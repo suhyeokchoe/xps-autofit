@@ -1,0 +1,354 @@
+"""
+XPS AutoFit — Expert Fitting Module (v0.4)
+==============================================
+화학상태 라이브러리 + 제약 피팅.
+
+설계 철학:
+1. 사용자가 재료 타입을 선택하면 컴포넌트가 자동 제안됨.
+2. 사용자는 컴포넌트를 편집 (추가/삭제/위치 조정)할 수 있음.
+3. 제약 플래그: 위치 고정, FWHM 공유, GL ratio 공유.
+4. 결과는 "논문을 재현"이 아닌 "제약 하에서 가장 좋은 해"를 리턴.
+5. Zr-O-Zr이 0.2%면 그대로 0.2%를 내보내고, 사용자가 판단.
+"""
+import numpy as np
+from scipy.optimize import curve_fit
+from dataclasses import dataclass, field, asdict
+from typing import List, Optional
+
+# -------------------------------------------------------------------
+# 재료 템플릿 라이브러리
+# -------------------------------------------------------------------
+# 각 컴포넌트:
+#   name, BE_center, BE_tolerance (위치 이동 허용 범위),
+#   fwhm_range (min, max)
+# 문헌 기반 (CasaXPS cookbook, NIST XPS DB, 관련 논문들)
+# -------------------------------------------------------------------
+
+MATERIAL_TEMPLATES = {
+    # ------------------ O1s region (525-540 eV) ------------------
+    'MOF (Zr-based)': {
+        'region': 'O1s',
+        'description': 'Zr-based MOFs: UiO-66/67, MOF-801/867',
+        'reference': 'Nat. Commun. 16, 162 (2025), Wang et al. JMCA 2017',
+        'components': [
+            {'name': 'Zr-O-Zr', 'be': 529.4, 'be_tol': 0.3, 'fwhm': (0.9, 2.0)},
+            {'name': 'Zr-O-C',  'be': 530.7, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+            {'name': 'Zr-O-H',  'be': 532.1, 'be_tol': 0.2, 'fwhm': (1.0, 2.2)},
+        ],
+        'optional_components': [
+            {'name': 'S=O (TFSI)', 'be': 531.6, 'be_tol': 0.2, 'fwhm': (1.0, 1.8),
+             'hint': 'TFSI 이온성 액체가 포함된 경우'},
+        ],
+    },
+    'Metal oxide (generic)': {
+        'region': 'O1s',
+        'description': 'Generic transition metal oxide (TiO2, Fe2O3, SnO2 etc)',
+        'reference': 'NIST XPS DB',
+        'components': [
+            {'name': 'M-O (lattice)',  'be': 530.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
+            {'name': 'O-H / defect',   'be': 531.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.2)},
+            {'name': 'C=O / adsorbed', 'be': 532.5, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
+        ],
+    },
+    'Polymer (C-O, C=O)': {
+        'region': 'O1s',
+        'description': 'Organic polymer with oxygen functionalities',
+        'reference': 'Beamson & Briggs High-Res XPS of Organic Polymers',
+        'components': [
+            {'name': 'C=O',  'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+            {'name': 'C-O',  'be': 532.8, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+            {'name': 'O-C=O','be': 533.5, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+        ],
+    },
+
+    # ------------------ C1s region (280-295 eV) ------------------
+    'Polymer (C1s)': {
+        'region': 'C1s',
+        'description': 'Typical organic polymer C1s',
+        'reference': 'Beamson & Briggs',
+        'components': [
+            {'name': 'C-C / C-H', 'be': 284.8, 'be_tol': 0.1, 'fwhm': (0.9, 1.5)},
+            {'name': 'C-O',       'be': 286.3, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'C=O',       'be': 287.8, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'O-C=O',     'be': 288.9, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+        ],
+    },
+    'Graphitic carbon': {
+        'region': 'C1s',
+        'description': 'Graphite / graphene / CNT',
+        'reference': 'Carbon 65, 249 (2013)',
+        'components': [
+            {'name': 'sp2 C=C',    'be': 284.4, 'be_tol': 0.1, 'fwhm': (0.7, 1.2)},
+            {'name': 'sp3 C-C',    'be': 285.2, 'be_tol': 0.2, 'fwhm': (0.9, 1.5)},
+            {'name': 'C-O',        'be': 286.3, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'C=O',        'be': 287.8, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'π-π* shake', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+        ],
+    },
+
+    # ------------------ F1s region (680-695 eV) ------------------
+    'Fluorinated (F1s)': {
+        'region': 'F1s',
+        'description': 'Ionic/covalent F compounds',
+        'reference': 'NIST XPS DB',
+        'components': [
+            {'name': 'Metal-F (ionic)', 'be': 685.5, 'be_tol': 0.5, 'fwhm': (1.2, 2.5)},
+            {'name': 'C-F (covalent)',  'be': 688.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+        ],
+    },
+}
+
+
+# -------------------------------------------------------------------
+# 컴포넌트 스펙 클래스 (사용자 편집 가능)
+# -------------------------------------------------------------------
+@dataclass
+class ComponentSpec:
+    name: str
+    be: float                    # 중심 BE
+    be_tol: float = 0.3          # BE 이동 허용 범위 (위치 고정 시 0)
+    fwhm_min: float = 0.8
+    fwhm_max: float = 2.5
+    lock_position: bool = False  # True면 be에 완전히 고정
+    lock_fwhm: Optional[float] = None  # 값이 있으면 그 값으로 고정
+    lock_eta: Optional[float] = None   # 값이 있으면 그 값으로 고정
+
+
+# -------------------------------------------------------------------
+# Pseudo-Voigt (import)
+# -------------------------------------------------------------------
+from xps_engine import pseudo_voigt, shirley_background
+
+
+# -------------------------------------------------------------------
+# Expert 피팅 엔진
+# -------------------------------------------------------------------
+def expert_fit(be, counts, components: List[ComponentSpec],
+               share_fwhm: bool = False, share_eta: bool = False,
+               use_shirley: bool = True):
+    """
+    사용자 정의 컴포넌트로 피팅.
+
+    parameter 벡터 구성 (전역 공유 플래그에 따라 달라짐):
+      - share_fwhm=False, share_eta=False: 각 컴포넌트 [amp, (be), (fwhm), (eta)]
+      - share_fwhm=True: 컴포넌트별 [amp, (be), (eta)] + 전역 [fwhm_shared]
+      - share_eta=True: 컴포넌트별 [amp, (be), (fwhm)] + 전역 [eta_shared]
+      - 둘 다 True: 컴포넌트별 [amp, (be)] + 전역 [fwhm, eta]
+
+      (be)는 lock_position=True면 빠짐
+      (fwhm)은 lock_fwhm 값이 있거나 share_fwhm이면 빠짐
+      (eta)는 lock_eta 값이 있거나 share_eta이면 빠짐
+    """
+    n = len(components)
+
+    # 1) 배경
+    if use_shirley:
+        bg = shirley_background(be, counts)
+    else:
+        bg = np.zeros_like(counts, dtype=float)
+    y_corr = counts - bg
+
+    # 2) 파라미터 인덱싱 설계
+    # 각 컴포넌트의 자유 파라미터 개수와 위치 기록
+    param_layout = []  # 각 항목: (comp_idx, param_name, p0, lo, hi)
+
+    amax = max(y_corr)
+
+    # 전역 shared 파라미터 준비
+    global_params = []
+    if share_fwhm:
+        avg_fwhm = np.mean([(c.fwhm_min + c.fwhm_max) / 2 for c in components])
+        fwhm_lo = max(c.fwhm_min for c in components)
+        fwhm_hi = min(c.fwhm_max for c in components)
+        # 안전: lo > hi 방지
+        if fwhm_lo >= fwhm_hi:
+            fwhm_lo, fwhm_hi = min(c.fwhm_min for c in components), max(c.fwhm_max for c in components)
+        global_params.append(('fwhm_shared', avg_fwhm, fwhm_lo, fwhm_hi))
+    if share_eta:
+        global_params.append(('eta_shared', 0.3, 0.0, 1.0))
+
+    # 각 컴포넌트 파라미터
+    for i, c in enumerate(components):
+        # amp: 항상 자유
+        be_idx = int(np.argmin(np.abs(be - c.be)))
+        amp0 = max(y_corr[be_idx], amax * 0.05)
+        param_layout.append((i, 'amp', amp0, amp0 * 0.01, amp0 * 5.0 + 1e-6))
+
+        # position
+        if not c.lock_position:
+            param_layout.append((i, 'be', c.be, c.be - c.be_tol, c.be + c.be_tol))
+
+        # fwhm (공유가 아니고 잠김도 아닐 때만)
+        if not share_fwhm and c.lock_fwhm is None:
+            fwhm0 = (c.fwhm_min + c.fwhm_max) / 2
+            param_layout.append((i, 'fwhm', fwhm0, c.fwhm_min, c.fwhm_max))
+
+        # eta
+        if not share_eta and c.lock_eta is None:
+            param_layout.append((i, 'eta', 0.3, 0.0, 1.0))
+
+    # 전역을 마지막에
+    for gp in global_params:
+        param_layout.append((-1, gp[0], gp[1], gp[2], gp[3]))
+
+    p0 = [pl[2] for pl in param_layout]
+    lo = [pl[3] for pl in param_layout]
+    hi = [pl[4] for pl in param_layout]
+
+    # 3) 모델 함수
+    def model(x, *params):
+        # param_layout 역해석
+        values = {i: {'amp': None, 'be': components[i].be,
+                     'fwhm': components[i].lock_fwhm,
+                     'eta': components[i].lock_eta} for i in range(n)}
+        global_fwhm, global_eta = None, None
+
+        for k, (ci, pname, *_) in enumerate(param_layout):
+            if ci == -1:
+                if pname == 'fwhm_shared':
+                    global_fwhm = params[k]
+                elif pname == 'eta_shared':
+                    global_eta = params[k]
+            else:
+                values[ci][pname] = params[k]
+
+        y = np.zeros_like(x, dtype=float)
+        for i, c in enumerate(components):
+            amp = values[i]['amp']
+            be_i = values[i]['be'] if not c.lock_position else c.be
+            if share_fwhm:
+                fwhm = global_fwhm
+            elif c.lock_fwhm is not None:
+                fwhm = c.lock_fwhm
+            else:
+                fwhm = values[i]['fwhm']
+            if share_eta:
+                eta = global_eta
+            elif c.lock_eta is not None:
+                eta = c.lock_eta
+            else:
+                eta = values[i]['eta']
+            y = y + pseudo_voigt(x, amp, be_i, fwhm, eta)
+        return y
+
+    # 4) 피팅
+    try:
+        popt, pcov = curve_fit(model, be, y_corr, p0=p0,
+                               bounds=(lo, hi), maxfev=30000)
+    except Exception as e:
+        return {'success': False, 'reason': f'Fit failed: {e}',
+                'be': be, 'counts': counts, 'background': bg}
+
+    # 5) 파라미터 복원
+    y_fit = model(be, *popt)
+    resid = y_corr - y_fit
+    ss_res = float(np.sum(resid ** 2))
+    ss_tot = float(np.sum((y_corr - np.mean(y_corr)) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+    rms = float(np.sqrt(ss_res / len(be)))
+
+    # AIC
+    N = len(be); k = len(popt)
+    aic = N * np.log(ss_res / N + 1e-20) + 2 * k
+
+    # 각 컴포넌트 값 복원
+    values = {i: {'amp': None, 'be': components[i].be,
+                 'fwhm': components[i].lock_fwhm,
+                 'eta': components[i].lock_eta} for i in range(n)}
+    global_fwhm, global_eta = None, None
+    # 파라미터 오차 (대각 성분)
+    perr = np.sqrt(np.abs(np.diag(pcov))) if pcov is not None else np.zeros_like(popt)
+    err_map = {i: {} for i in range(n)}
+    global_err = {}
+
+    for idx, (ci, pname, *_) in enumerate(param_layout):
+        if ci == -1:
+            if pname == 'fwhm_shared':
+                global_fwhm = popt[idx]; global_err['fwhm'] = perr[idx]
+            elif pname == 'eta_shared':
+                global_eta = popt[idx]; global_err['eta'] = perr[idx]
+        else:
+            values[ci][pname] = popt[idx]
+            err_map[ci][pname] = perr[idx]
+
+    # 6) 결과 정리
+    result_components = []
+    for i, c in enumerate(components):
+        amp = values[i]['amp']
+        be_i = values[i]['be'] if not c.lock_position else c.be
+        if share_fwhm:
+            fwhm = global_fwhm
+        elif c.lock_fwhm is not None:
+            fwhm = c.lock_fwhm
+        else:
+            fwhm = values[i]['fwhm']
+        if share_eta:
+            eta = global_eta
+        elif c.lock_eta is not None:
+            eta = c.lock_eta
+        else:
+            eta = values[i]['eta']
+
+        comp_y = pseudo_voigt(be, amp, be_i, fwhm, eta)
+        area = float(abs(np.trapezoid(comp_y, be)))
+        result_components.append({
+            'name': c.name,
+            'amplitude': float(amp),
+            'position': float(be_i),
+            'fwhm': float(fwhm),
+            'eta': float(eta),
+            'area': area,
+            'curve': comp_y,
+            # 에러바
+            'amp_err': float(err_map[i].get('amp', 0)),
+            'be_err': float(err_map[i].get('be', 0)) if not c.lock_position else 0,
+            'fwhm_err': float(err_map[i].get('fwhm', global_err.get('fwhm', 0))
+                              if not share_fwhm else global_err.get('fwhm', 0)),
+            # 플래그 기록
+            'position_locked': c.lock_position,
+            'fwhm_shared': share_fwhm,
+            'eta_shared': share_eta,
+        })
+
+    # 정렬 (BE 내림차순)
+    result_components.sort(key=lambda c: -c['position'])
+    total_area = sum(c['area'] for c in result_components) or 1
+    for c in result_components:
+        c['area_pct'] = 100 * c['area'] / total_area
+
+    return {
+        'success': True,
+        'mode': 'expert',
+        'be': be, 'counts': counts, 'background': bg,
+        'y_corrected': y_corr, 'y_fit': y_fit,
+        'components': result_components,
+        'r_squared': r2, 'rms': rms, 'aic': aic,
+        'n_components': n,
+        'n_free_params': k,
+        'share_fwhm': share_fwhm, 'share_eta': share_eta,
+        'shared_fwhm_value': global_fwhm if share_fwhm else None,
+        'shared_eta_value': global_eta if share_eta else None,
+    }
+
+
+def components_from_template(template_key: str,
+                              include_optional: List[str] = None) -> List[ComponentSpec]:
+    """템플릿 이름으로부터 ComponentSpec 리스트 생성"""
+    if template_key not in MATERIAL_TEMPLATES:
+        raise ValueError(f"Unknown template: {template_key}")
+    tmpl = MATERIAL_TEMPLATES[template_key]
+    specs = []
+    for c in tmpl['components']:
+        specs.append(ComponentSpec(
+            name=c['name'], be=c['be'], be_tol=c['be_tol'],
+            fwhm_min=c['fwhm'][0], fwhm_max=c['fwhm'][1]
+        ))
+    # 옵션 컴포넌트
+    include_optional = include_optional or []
+    for c in tmpl.get('optional_components', []):
+        if c['name'] in include_optional:
+            specs.append(ComponentSpec(
+                name=c['name'], be=c['be'], be_tol=c['be_tol'],
+                fwhm_min=c['fwhm'][0], fwhm_max=c['fwhm'][1]
+            ))
+    return specs
