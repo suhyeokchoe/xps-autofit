@@ -1,10 +1,17 @@
 """
-XPS Auto-fitting Engine v0.2
+XPS Auto-fitting Engine v0.3
 ================================================
-- 2차 미분 기반 shoulder 감지
-- 다중 모델 AIC 기반 피크 개수 자동 결정 (overfitting 방지)
-- 원소별 도메인 prior
-- Calibration: C1s 기준 shift 옵션
+v0.2 대비 추가:
+- 스핀-오빗 doublet 자동 처리 (p, d, f orbital)
+  · ΔBE와 면적비를 물리 상수로 강제
+  · 같은 화학상태는 FWHM/η 공유
+- Doublet mode와 singlet mode 자동 분기
+- 파라미터 테이블 BE 내림차순 정렬 (XPS 관례)
+
+물리 제약:
+  2p: j=3/2,1/2 → area ratio 2:1
+  3d: j=5/2,3/2 → area ratio 3:2
+  4f: j=7/2,5/2 → area ratio 4:3
 """
 import csv
 import io
@@ -14,31 +21,58 @@ from scipy.optimize import curve_fit
 from pathlib import Path
 
 # -------------------------------------------------------------------
-# 원소별 도메인 prior
+# 원소별 prior
 # -------------------------------------------------------------------
 ELEMENT_PRIORS = {
+    # Singlet: (BE_min, BE_max, FWHM_min, FWHM_max)
     'F1s':   (680, 695, 0.8, 3.5),
     'C1s':   (280, 295, 0.7, 2.5),
     'O1s':   (525, 540, 0.8, 3.0),
-    'Sn3d':  (480, 500, 0.7, 2.0),
-    'Cu2p':  (925, 970, 0.8, 3.0),
     'N1s':   (395, 410, 0.8, 2.5),
-    'Si2p':  (95, 110, 0.6, 2.5),
+}
+
+# Doublet: (BE_min, BE_max, FWHM_min, FWHM_max, delta_BE, area_ratio)
+# delta_BE: main(낮은 BE) 기준 minor는 +delta_BE
+# area_ratio = amp_main / amp_minor (같은 FWHM이면 면적비와 동일)
+DOUBLET_PRIORS = {
+    # 2p → 2:1
+    'Cu2p':  (925, 970, 0.9, 3.0, 19.8,  2.0),
+    'Ti2p':  (450, 475, 0.8, 2.5, 5.7,   2.0),
+    'Si2p':  (95,  110, 0.6, 2.5, 0.6,   2.0),
+    'Fe2p':  (700, 740, 1.0, 4.0, 13.6,  2.0),
+    'Ni2p':  (845, 890, 1.0, 3.5, 17.3,  2.0),
+    # 3d → 3:2
+    'Sn3d':  (480, 500, 0.7, 2.0, 8.41,  1.5),
+    'In3d':  (440, 460, 0.7, 2.0, 7.55,  1.5),
+    'Mo3d':  (225, 245, 0.8, 2.5, 3.15,  1.5),
+    'Ag3d':  (365, 380, 0.7, 2.0, 6.00,  1.5),
+    # 4f → 4:3
+    'Au4f':  (80,  92,  0.6, 1.8, 3.65,  1.333),
+    'W4f':   (30,  42,  0.7, 2.0, 2.15,  1.333),
 }
 
 
 def detect_region(be_min, be_max):
-    for name, (lo, hi, _, _) in ELEMENT_PRIORS.items():
+    candidates = []
+    for name, tup in ELEMENT_PRIORS.items():
+        lo, hi = tup[0], tup[1]
         if be_min >= lo - 5 and be_max <= hi + 5:
-            return name
-    return None
+            candidates.append(name)
+    for name, tup in DOUBLET_PRIORS.items():
+        lo, hi = tup[0], tup[1]
+        if be_min >= lo - 5 and be_max <= hi + 5:
+            candidates.append(name)
+    return candidates[0] if candidates else None
+
+
+def is_doublet(region):
+    return region in DOUBLET_PRIORS
 
 
 # -------------------------------------------------------------------
-# 데이터 로딩
+# CSV 로딩
 # -------------------------------------------------------------------
 def load_xps_csv(path_or_text, source_name='uploaded'):
-    """CSV 파일 경로 or CSV 텍스트 모두 지원"""
     is_path = False
     if isinstance(path_or_text, (str, Path)):
         s = str(path_or_text)
@@ -86,13 +120,12 @@ def load_xps_csv(path_or_text, source_name='uploaded'):
                 continue
         be.append(x); counts.append(y)
     be = np.array(be); counts = np.array(counts)
-
     if len(be) == 0:
         raise ValueError("데이터 행을 찾지 못했습니다. CSV 구조를 확인하세요.")
     if be[0] > be[-1]:
         be, counts = be[::-1], counts[::-1]
 
-    if meta['region'] is None:
+    if meta['region'] is None or meta['region'] == 'unknown':
         meta['region'] = detect_region(be.min(), be.max()) or 'unknown'
     return be, counts, meta
 
@@ -137,21 +170,37 @@ def multi_pv(x, *params):
     return y
 
 
+def multi_doublet_pv(x, delta_BE, area_ratio, *params):
+    """
+    n_states 화학상태, 각각 doublet.
+    params per state: [amp_main, center_main, fwhm_shared, eta_shared]
+    제약: center_minor = center_main + delta_BE
+          amp_minor    = amp_main / area_ratio
+          fwhm, eta 동일 (같은 화학상태)
+    """
+    n_states = len(params) // 4
+    y = np.zeros_like(x, dtype=float)
+    for i in range(n_states):
+        amp_m, c_m, fwhm, eta = params[i*4:i*4+4]
+        y = y + pseudo_voigt(x, amp_m, c_m, fwhm, eta)
+        amp_n = amp_m / area_ratio
+        c_n = c_m + delta_BE
+        y = y + pseudo_voigt(x, amp_n, c_n, fwhm, eta)
+    return y
+
+
 # -------------------------------------------------------------------
-# 피크 감지: 1차(주 피크) + 2차 미분(shoulder)
+# 피크 감지
 # -------------------------------------------------------------------
 def detect_peaks_v2(x, y_corr, region=None):
     win = max(7, len(y_corr) // 25)
     if win % 2 == 0: win += 1
-
     y_smooth = savgol_filter(y_corr, win, 3)
     d2 = savgol_filter(y_corr, win, 3, deriv=2)
 
-    # 1차: 명확한 봉우리
     prom = max(y_smooth) * 0.05
     main_idx, _ = find_peaks(y_smooth, prominence=prom,
                               distance=max(5, len(x)//40))
-    # 2차: shoulder (보수적 threshold)
     neg_d2 = -d2
     main_d2 = [neg_d2[i] for i in main_idx] if len(main_idx) else [np.max(neg_d2)]
     d2_thr = np.median(main_d2) * 0.30
@@ -173,11 +222,13 @@ def detect_peaks_v2(x, y_corr, region=None):
 
 
 # -------------------------------------------------------------------
-# 단일 n_peaks로 피팅
+# Singlet 피팅
 # -------------------------------------------------------------------
 def fit_n_peaks(x, y_corr, n, init_centers, region=None):
     if region in ELEMENT_PRIORS:
         _, _, fwhm_min, fwhm_max = ELEMENT_PRIORS[region]
+    elif region in DOUBLET_PRIORS:
+        _, _, fwhm_min, fwhm_max, _, _ = DOUBLET_PRIORS[region]
     else:
         fwhm_min, fwhm_max = 0.5, 5.0
 
@@ -190,8 +241,8 @@ def fit_n_peaks(x, y_corr, n, init_centers, region=None):
         hi += [amp0 * 5.0,  c0 + 1.5, fwhm_max, 1.0]
 
     try:
-        popt, pcov = curve_fit(multi_pv, x, y_corr,
-                               p0=p0, bounds=(lo, hi), maxfev=15000)
+        popt, _ = curve_fit(multi_pv, x, y_corr,
+                            p0=p0, bounds=(lo, hi), maxfev=15000)
         y_fit = multi_pv(x, *popt)
         resid = y_corr - y_fit
         ss_res = float(np.sum(resid ** 2))
@@ -201,15 +252,50 @@ def fit_n_peaks(x, y_corr, n, init_centers, region=None):
         N = len(x); k = 4 * n
         aic = N * np.log(ss_res / N + 1e-20) + 2 * k
         return {'popt': popt, 'y_fit': y_fit, 'r2': r2, 'rms': rms,
-                'aic': aic, 'n_peaks': n}
+                'aic': aic, 'n_peaks': n, 'mode': 'singlet'}
     except Exception:
         return None
 
 
 # -------------------------------------------------------------------
-# 자동 파이프라인 with AIC 모델 선택
+# Doublet 피팅
 # -------------------------------------------------------------------
-def auto_fit_v2(be, counts, meta=None, max_peaks=4):
+def fit_n_doublets(x, y_corr, n_states, init_centers_main, region):
+    _, _, fwhm_min, fwhm_max, delta_BE, area_ratio = DOUBLET_PRIORS[region]
+
+    p0, lo, hi = [], [], []
+    for c0 in init_centers_main[:n_states]:
+        idx0 = int(np.argmin(np.abs(x - c0)))
+        amp0 = max(y_corr[idx0], max(y_corr) * 0.05)
+        p0 += [amp0, c0, np.mean([fwhm_min, fwhm_max]), 0.3]
+        lo += [amp0 * 0.05, c0 - 2.0, fwhm_min, 0.0]
+        hi += [amp0 * 5.0,  c0 + 2.0, fwhm_max, 1.0]
+
+    def model(x_arr, *params):
+        return multi_doublet_pv(x_arr, delta_BE, area_ratio, *params)
+
+    try:
+        popt, _ = curve_fit(model, x, y_corr,
+                            p0=p0, bounds=(lo, hi), maxfev=15000)
+        y_fit = model(x, *popt)
+        resid = y_corr - y_fit
+        ss_res = float(np.sum(resid ** 2))
+        ss_tot = float(np.sum((y_corr - np.mean(y_corr)) ** 2))
+        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+        rms = float(np.sqrt(ss_res / len(x)))
+        N = len(x); k = 4 * n_states  # 자유도: state당 4
+        aic = N * np.log(ss_res / N + 1e-20) + 2 * k
+        return {'popt': popt, 'y_fit': y_fit, 'r2': r2, 'rms': rms,
+                'aic': aic, 'n_peaks': n_states, 'mode': 'doublet',
+                'delta_BE': delta_BE, 'area_ratio': area_ratio}
+    except Exception:
+        return None
+
+
+# -------------------------------------------------------------------
+# 자동 파이프라인 (singlet/doublet 자동 분기)
+# -------------------------------------------------------------------
+def auto_fit_v3(be, counts, meta=None, max_peaks=4):
     meta = meta or {}
     region = meta.get('region')
 
@@ -223,59 +309,123 @@ def auto_fit_v2(be, counts, meta=None, max_peaks=4):
 
     init_centers = [float(be[i]) for i in peaks_idx]
 
-    max_try = min(max_peaks, len(init_centers))
-    max_try = max(max_try, 1)
-
     trials = []
-    for n in range(1, max_try + 1):
-        ranked = sorted(init_centers,
-                        key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
-        centers = sorted(ranked[:n])
-        result = fit_n_peaks(be, y_corr, n, centers, region)
-        if result is not None:
-            trials.append(result)
+
+    if is_doublet(region):
+        # Doublet 우선 시도
+        max_states = max(1, min(max_peaks, max(1, len(init_centers) // 2 + 1)))
+        sorted_by_be = sorted(init_centers)
+        # main 후보: 모든 감지 피크 (fit_n_doublets가 알아서 상위 n개 사용)
+        for n in range(1, max_states + 1):
+            ranked = sorted(init_centers,
+                            key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
+            centers = sorted(ranked[:n])
+            result = fit_n_doublets(be, y_corr, n, centers, region)
+            if result is not None:
+                trials.append(result)
+
+        # Doublet이 안 맞으면 singlet fallback
+        if not trials or (trials and min(t['r2'] for t in trials) < 0.9):
+            for n in range(1, min(max_peaks, len(init_centers)) + 1):
+                ranked = sorted(init_centers,
+                                key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
+                centers = sorted(ranked[:n])
+                r = fit_n_peaks(be, y_corr, n, centers, region)
+                if r is not None: trials.append(r)
+    else:
+        # Singlet only
+        max_try = min(max_peaks, len(init_centers))
+        max_try = max(max_try, 1)
+        for n in range(1, max_try + 1):
+            ranked = sorted(init_centers,
+                            key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
+            centers = sorted(ranked[:n])
+            result = fit_n_peaks(be, y_corr, n, centers, region)
+            if result is not None:
+                trials.append(result)
 
     if not trials:
         return {'success': False, 'reason': 'All fits failed',
                 'be': be, 'counts': counts, 'background': bg}
 
-    best = min(trials, key=lambda r: r['aic'])
+    # AIC 최소 선택 (doublet이 같은 AIC면 우선)
+    best = min(trials, key=lambda r: (r['aic'],
+                                       0 if r['mode'] == 'doublet' else 1))
     if best['r2'] < 0.9:
         return {'success': False, 'reason': f'Best R²={best["r2"]:.3f} too low',
                 'be': be, 'counts': counts, 'background': bg}
 
+    # 컴포넌트 정리
     components = []
-    for i in range(best['n_peaks']):
-        a, c, f, e = best['popt'][i*4:i*4+4]
-        comp_y = pseudo_voigt(be, a, c, f, e)
-        components.append({
-            'amplitude': float(a), 'position': float(c),
-            'fwhm': float(f), 'eta': float(e),
-            'area': float(abs(np.trapezoid(comp_y, be))),
-            'curve': comp_y,
-        })
-    components.sort(key=lambda c: c['position'])
+    if best['mode'] == 'doublet':
+        delta_BE = best['delta_BE']
+        area_ratio = best['area_ratio']
+        for i in range(best['n_peaks']):
+            amp_m, c_m, fwhm, eta = best['popt'][i*4:i*4+4]
+            comp_y_m = pseudo_voigt(be, amp_m, c_m, fwhm, eta)
+            components.append({
+                'amplitude': float(amp_m), 'position': float(c_m),
+                'fwhm': float(fwhm), 'eta': float(eta),
+                'area': float(abs(np.trapezoid(comp_y_m, be))),
+                'curve': comp_y_m,
+                'label': f'State {i+1} (main)',
+            })
+            amp_n = amp_m / area_ratio
+            c_n = c_m + delta_BE
+            comp_y_n = pseudo_voigt(be, amp_n, c_n, fwhm, eta)
+            components.append({
+                'amplitude': float(amp_n), 'position': float(c_n),
+                'fwhm': float(fwhm), 'eta': float(eta),
+                'area': float(abs(np.trapezoid(comp_y_n, be))),
+                'curve': comp_y_n,
+                'label': f'State {i+1} (minor)',
+            })
+    else:
+        for i in range(best['n_peaks']):
+            a, c, f, e = best['popt'][i*4:i*4+4]
+            comp_y = pseudo_voigt(be, a, c, f, e)
+            components.append({
+                'amplitude': float(a), 'position': float(c),
+                'fwhm': float(f), 'eta': float(e),
+                'area': float(abs(np.trapezoid(comp_y, be))),
+                'curve': comp_y,
+                'label': f'Peak {i+1}',
+            })
+
+    # XPS 관례: 큰 BE → 작은 BE 순
+    components.sort(key=lambda c: -c['position'])
+    # 정렬 후 Peak 번호 재할당 (Peak 1 = 가장 큰 BE)
+    for i, c in enumerate(components):
+        if c['label'].startswith('Peak '):
+            c['label'] = f'Peak {i+1}'
     total_area = sum(c['area'] for c in components) or 1
     for c in components:
         c['area_pct'] = 100 * c['area'] / total_area
 
     trial_summary = [{'n_peaks': t['n_peaks'], 'r2': t['r2'],
-                      'rms': t['rms'], 'aic': t['aic']} for t in trials]
+                      'rms': t['rms'], 'aic': t['aic'],
+                      'mode': t['mode']} for t in trials]
 
     return {
         'success': True, 'meta': meta,
         'region': region,
+        'mode': best['mode'],
         'be': be, 'counts': counts, 'background': bg,
         'y_corrected': y_corr, 'y_fit': best['y_fit'],
         'components': components,
         'r_squared': best['r2'], 'rms': best['rms'], 'aic': best['aic'],
         'n_peaks': best['n_peaks'],
         'trials': trial_summary,
+        'doublet_info': {
+            'delta_BE': best.get('delta_BE'),
+            'area_ratio': best.get('area_ratio'),
+        } if best['mode'] == 'doublet' else None,
     }
 
 
-# -------------------------------------------------------------------
-# Calibration
-# -------------------------------------------------------------------
+# 하위 호환
+auto_fit_v2 = auto_fit_v3
+
+
 def calibrate_shift(be, shift):
     return be + shift
