@@ -304,7 +304,7 @@ ax_resid.plot(be, resid, 'o-', mfc='none', mec='gray', color='gray',
 ax_resid.axhline(0, color='red', lw=0.8)
 ax_resid.set_xlabel('Binding Energy (eV)')
 ax_resid.set_ylabel('Residual')
-ax_resid.invert_xaxis()  # XPS 관례
+# ax_resid.invert_xaxis()  # sharex=True라 ax_main과 자동 연동됨
 ax_resid.grid(alpha=0.2)
 
 plt.tight_layout()
