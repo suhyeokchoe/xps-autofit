@@ -66,4 +66,5 @@ material-aware constraint fitting. https://github.com/suhyeokchoe/xps-autofit
 
 *Last updated: April 2026*
 
+
 당신의 연구는 지금 이 순간에도 세상의 경계를 넓히고 있습니다. 새로운 가능성을 함께 만들어냅니다.
