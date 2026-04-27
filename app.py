@@ -50,10 +50,10 @@ st.set_page_config(
         **프로젝트 / 코드 / 기여자**
         - Repository: [github.com/suhyeokchoe/xps-autofit](https://github.com/suhyeokchoe/xps-autofit)
         - Authors: [AUTHORS.md](https://github.com/suhyeokchoe/xps-autofit/blob/main/AUTHORS.md)
+        - Contact : heyok7714@naver.com or heyok7714@knu.ac.kr
         - License: MIT
 
         **참고 문헌**
-        - CasaXPS Cookbook (Casa Software Ltd, 2019)
         - Shirley, D. A. (1972). *Phys. Rev. B*, 5(12), 4709
         - Akaike, H. (1974). *IEEE Trans. Auto. Control*, 19(6), 716
         - NIST X-ray Photoelectron Spectroscopy Database
