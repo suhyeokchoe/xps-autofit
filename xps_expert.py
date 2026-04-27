@@ -125,25 +125,18 @@ from xps_engine import pseudo_voigt, shirley_background
 # -------------------------------------------------------------------
 def expert_fit(be, counts, components: List[ComponentSpec],
                share_fwhm: bool = False, share_eta: bool = False,
-               use_shirley: bool = True):
+               use_shirley: bool = True, bg_kwargs=None):
     """
     사용자 정의 컴포넌트로 피팅.
 
-    parameter 벡터 구성 (전역 공유 플래그에 따라 달라짐):
-      - share_fwhm=False, share_eta=False: 각 컴포넌트 [amp, (be), (fwhm), (eta)]
-      - share_fwhm=True: 컴포넌트별 [amp, (be), (eta)] + 전역 [fwhm_shared]
-      - share_eta=True: 컴포넌트별 [amp, (be), (fwhm)] + 전역 [eta_shared]
-      - 둘 다 True: 컴포넌트별 [amp, (be)] + 전역 [fwhm, eta]
-
-      (be)는 lock_position=True면 빠짐
-      (fwhm)은 lock_fwhm 값이 있거나 share_fwhm이면 빠짐
-      (eta)는 lock_eta 값이 있거나 share_eta이면 빠짐
+    bg_kwargs: shirley_background()에 전달할 추가 옵션 dict
     """
+    bg_kwargs = bg_kwargs or {}
     n = len(components)
 
     # 1) 배경
     if use_shirley:
-        bg = shirley_background(be, counts)
+        bg = shirley_background(be, counts, **bg_kwargs)
     else:
         bg = np.zeros_like(counts, dtype=float)
     y_corr = counts - bg

@@ -133,22 +133,132 @@ def load_xps_csv(path_or_text, source_name='uploaded'):
 # -------------------------------------------------------------------
 # Shirley background
 # -------------------------------------------------------------------
-def shirley_background(x, y, max_iter=60, tol=1e-6):
+def shirley_background(x, y, max_iter=60, tol=1e-6,
+                        anchor_left=None, anchor_right=None,
+                        auto_anchor=True):
+    """
+    Iterative Shirley background.
+
+    Parameters:
+        x, y: data (x must be sorted ascending in BE)
+        max_iter, tol: 수렴 파라미터
+        anchor_left, anchor_right: 사용자 지정 anchor BE 값.
+                                    None이면 자동 감지 사용.
+        auto_anchor: True면 anchor 자동 감지. False면 양 끝점 사용.
+
+    표준 Shirley 정의:
+    - BG[0]  = y[0]  (낮은 BE 끝)
+    - BG[-1] = y[-1] (높은 BE 끝)
+    - 중간은 cumulative integral로 결정
+
+    Anchor 모드 (auto_anchor=True 또는 anchor_left/right 지정):
+    - 피크가 없는 양 끝 영역(anchor)을 자동 감지
+    - Shirley는 anchor 사이에서만 계산
+    - Anchor 바깥은 raw data를 따라감 (BG = data)
+    """
+    # Anchor 자동 감지 또는 사용자 지정
+    if anchor_left is not None or anchor_right is not None:
+        # 사용자 지정 (BE 값 → index 변환)
+        if anchor_left is not None:
+            left_idx = int(np.argmin(np.abs(x - anchor_left)))
+        else:
+            left_idx = 0
+        if anchor_right is not None:
+            right_idx = int(np.argmin(np.abs(x - anchor_right)))
+        else:
+            right_idx = len(y) - 1
+        if left_idx > right_idx:
+            left_idx, right_idx = right_idx, left_idx
+        use_anchor = True
+    elif auto_anchor:
+        left_idx, right_idx = _detect_anchor_indices(x, y)
+        use_anchor = True
+    else:
+        left_idx, right_idx = 0, len(y) - 1
+        use_anchor = False
+
+    # Shirley는 [left_idx, right_idx] 구간에서만 계산
+    if use_anchor and (left_idx > 0 or right_idx < len(y) - 1):
+        x_mid = x[left_idx:right_idx+1]
+        y_mid = y[left_idx:right_idx+1]
+        bg_mid = _shirley_iterate(x_mid, y_mid, max_iter, tol)
+        # 전체 BG: 바깥은 raw data
+        bg_full = np.zeros_like(y, dtype=float)
+        bg_full[:left_idx] = y[:left_idx]
+        bg_full[left_idx:right_idx+1] = bg_mid
+        bg_full[right_idx+1:] = y[right_idx+1:]
+        return bg_full
+    else:
+        return _shirley_iterate(x, y, max_iter, tol)
+
+
+def _shirley_iterate(x, y, max_iter=60, tol=1e-6):
+    """Core Shirley iteration on full given range."""
     B = np.zeros_like(y, dtype=float)
-    I_L, I_R = y[0], y[-1]
+    I_start = y[0]
+    I_end = y[-1]
     for _ in range(max_iter):
         cum = np.zeros_like(y, dtype=float)
         for i in range(1, len(y)):
             cum[i] = cum[i-1] + 0.5 * (
-                (y[i-1] - I_R - B[i-1]) + (y[i] - I_R - B[i])
+                (y[i-1] - I_start - B[i-1]) + (y[i] - I_start - B[i])
             ) * (x[i] - x[i-1])
         denom = cum[-1] if abs(cum[-1]) > 1e-12 else 1.0
-        k = (I_L - I_R) / denom
-        B_new = I_R + k * cum
-        if np.max(np.abs(B_new - B)) < tol * max(abs(I_L - I_R), 1.0):
-            return B_new
+        k = (I_end - I_start) / denom
+        B_new = k * cum
+        if np.max(np.abs(B_new - B)) < tol * max(abs(I_end - I_start), 1.0):
+            B = B_new; break
         B = B_new
-    return B
+    return I_start + B
+
+
+def _detect_anchor_indices(x, y, window_eV=1.5, threshold_ratio=0.08):
+    """
+    피크 영역 자동 감지로 anchor index 결정.
+
+    Algorithm:
+    - 1차 미분 계산
+    - 양 끝에서 출발, |dy/dx|가 처음 threshold 넘는 곳 = anchor 끝
+    - 양 끝 anchor 영역에서는 BG = raw data (변동 없음)
+    - 가운데 = 피크 영역 = Shirley 계산 영역
+    """
+    step = abs(x[1] - x[0])
+    win = max(7, int(window_eV / step))
+    if win % 2 == 0: win += 1
+    if win >= len(y):
+        win = len(y) - 1 if len(y) % 2 == 0 else len(y) - 2
+
+    try:
+        dy = savgol_filter(y, win, 3, deriv=1)
+    except Exception:
+        return 0, len(y) - 1
+
+    abs_dy = np.abs(dy)
+    threshold = abs_dy.max() * threshold_ratio
+
+    # 왼쪽: 인덱스 0부터 출발해서 첫 threshold 초과 지점 직전
+    left_idx = 0
+    for i in range(len(abs_dy)):
+        if abs_dy[i] > threshold:
+            left_idx = max(0, i - 1)
+            break
+
+    # 오른쪽: 끝에서 거꾸로
+    right_idx = len(abs_dy) - 1
+    for i in range(len(abs_dy) - 1, -1, -1):
+        if abs_dy[i] > threshold:
+            right_idx = min(len(y) - 1, i + 1)
+            break
+
+    # 안전 마진: 각 끝에서 최소 5 포인트는 anchor
+    left_idx = max(left_idx, 5)
+    right_idx = min(right_idx, len(y) - 6)
+
+    # left가 right보다 크거나 너무 가까우면 fallback (전체 영역 사용)
+    if right_idx - left_idx < len(y) // 4:
+        left_idx, right_idx = 0, len(y) - 1
+
+    return left_idx, right_idx
 
 
 # -------------------------------------------------------------------
@@ -295,27 +405,30 @@ def fit_n_doublets(x, y_corr, n_states, init_centers_main, region):
 # -------------------------------------------------------------------
 # 자동 파이프라인 (singlet/doublet 자동 분기)
 # -------------------------------------------------------------------
-def auto_fit_v3(be, counts, meta=None, max_peaks=4):
+def auto_fit_v3(be, counts, meta=None, max_peaks=4, bg_kwargs=None):
     """
     자동 피팅. BE 범위가 500 eV 이상이면 자동으로 Survey 모드로 분기.
+
+    bg_kwargs: shirley_background()에 전달할 추가 옵션 dict
+               (예: {'auto_anchor': False} or {'anchor_left': 535, 'anchor_right': 528})
     """
+    bg_kwargs = bg_kwargs or {}
+
     # ---- 자동 분기: Survey vs Narrow ----
     try:
         from xps_survey import is_survey_scan, analyze_survey
         if is_survey_scan(be):
-            # Survey 모드로 위임
             survey_result = analyze_survey(be, counts)
             survey_result['meta'] = meta or {}
             return survey_result
     except ImportError:
-        # xps_survey 모듈 없으면 narrow 모드로 fallback
         pass
 
     # ---- Narrow 모드 (기존 로직) ----
     meta = meta or {}
     region = meta.get('region')
 
-    bg = shirley_background(be, counts)
+    bg = shirley_background(be, counts, **bg_kwargs)
     y_corr = counts - bg
 
     peaks_idx, y_smooth = detect_peaks_v2(be, y_corr, region)

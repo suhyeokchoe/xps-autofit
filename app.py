@@ -373,6 +373,40 @@ with st.sidebar:
         disabled=not apply_cal
     )
 
+    st.divider()
+    st.header("📐 Background Anchor")
+    st.caption(
+        "Shirley BG의 시작/끝 위치를 결정합니다. "
+        "복잡한 데이터는 자동 감지가 부정확할 수 있어요."
+    )
+    bg_mode = st.radio(
+        "BG 영역 결정 방식",
+        ['Auto (피크 영역 자동 감지)',
+         'Full range (양 끝점 그대로)',
+         'Manual (BE 직접 지정)'],
+        index=0,
+        help=(
+            "**Auto**: 1차 미분으로 피크 시작/끝을 자동 감지 (권장)\n\n"
+            "**Full range**: 데이터 양 끝을 그대로 anchor로 사용 "
+            "(끝부분에 피크가 있으면 BG가 부정확)\n\n"
+            "**Manual**: 사용자가 BE 값으로 직접 지정"
+        )
+    )
+
+    bg_anchor_left = None
+    bg_anchor_right = None
+    if bg_mode == 'Manual (BE 직접 지정)':
+        be_min_val = float(0)  # 나중에 데이터 로드 후 갱신
+        bg_anchor_left = st.number_input(
+            "낮은 BE 쪽 anchor (eV)",
+            value=0.0, step=0.5, format="%.2f",
+            help="BG가 anchor BE 값에서 raw data를 따라가도록 함"
+        )
+        bg_anchor_right = st.number_input(
+            "높은 BE 쪽 anchor (eV)",
+            value=0.0, step=0.5, format="%.2f"
+        )
+
 
 # =========================================================================
 # 업로드 전
@@ -420,6 +454,18 @@ except Exception as e:
 if apply_cal and cal_shift != 0:
     be = calibrate_shift(be, cal_shift)
     meta['calibrated'] = f"shift={cal_shift:+.2f} eV"
+
+# BG 모드에 따라 옵션 dict 생성
+bg_kwargs = {}
+if bg_mode == 'Auto (피크 영역 자동 감지)':
+    bg_kwargs = {'auto_anchor': True}
+elif bg_mode == 'Full range (양 끝점 그대로)':
+    bg_kwargs = {'auto_anchor': False}
+elif bg_mode == 'Manual (BE 직접 지정)':
+    bg_kwargs = {
+        'anchor_left': bg_anchor_left,
+        'anchor_right': bg_anchor_right,
+    }
 
 # 자동 분기 결정
 auto_is_survey = is_survey_scan(be)
@@ -480,9 +526,11 @@ with tab_auto:
 
         with st.spinner("피팅 중..."):
             if manual_n == 0:
-                result = auto_fit_v3(be, counts, eff_meta, max_peaks=max_peaks)
+                result = auto_fit_v3(be, counts, eff_meta,
+                                       max_peaks=max_peaks,
+                                       bg_kwargs=bg_kwargs)
             else:
-                bg = shirley_background(be, counts)
+                bg = shirley_background(be, counts, **bg_kwargs)
                 y_corr = counts - bg
                 peaks_idx, _ = detect_peaks_v2(be, y_corr, eff_meta.get('region'))
                 if len(peaks_idx) == 0:
@@ -649,7 +697,8 @@ with tab_expert:
             exp_result = expert_fit(
                 be, counts, edited_comps,
                 share_fwhm=share_fwhm, share_eta=share_eta,
-                use_shirley=use_shirley_exp
+                use_shirley=use_shirley_exp,
+                bg_kwargs=bg_kwargs,
             )
         if not exp_result['success']:
             st.error(f"피팅 실패: {exp_result['reason']}")
