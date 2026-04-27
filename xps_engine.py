@@ -296,6 +296,22 @@ def fit_n_doublets(x, y_corr, n_states, init_centers_main, region):
 # 자동 파이프라인 (singlet/doublet 자동 분기)
 # -------------------------------------------------------------------
 def auto_fit_v3(be, counts, meta=None, max_peaks=4):
+    """
+    자동 피팅. BE 범위가 500 eV 이상이면 자동으로 Survey 모드로 분기.
+    """
+    # ---- 자동 분기: Survey vs Narrow ----
+    try:
+        from xps_survey import is_survey_scan, analyze_survey
+        if is_survey_scan(be):
+            # Survey 모드로 위임
+            survey_result = analyze_survey(be, counts)
+            survey_result['meta'] = meta or {}
+            return survey_result
+    except ImportError:
+        # xps_survey 모듈 없으면 narrow 모드로 fallback
+        pass
+
+    # ---- Narrow 모드 (기존 로직) ----
     meta = meta or {}
     region = meta.get('region')
 

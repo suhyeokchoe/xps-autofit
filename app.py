@@ -1,11 +1,11 @@
 """
-XPS AutoFit — Streamlit Web App (v0.4)
+XPS AutoFit — Streamlit Web App (v0.5)
 ================================================
-v0.3 → v0.4:
-- Expert 모드: 재료 템플릿 기반 제약 피팅
-- Peak 위치/FWHM 공유 제약
-- 논문 수준 피팅 (자유도 5~12 조절 가능)
-- 정직한 결과 표시
+v0.4 → v0.5:
+- Survey scan 자동 분석 추가
+- 자동 모드에서 BE 범위로 Narrow/Survey 자동 분기
+- 별도 Survey 탭 신설
+- 원소 자동 식별 + atomic % 정량 (multi-line consistency check)
 
 실행: streamlit run app.py
 """
@@ -25,6 +25,9 @@ from xps_expert import (
     MATERIAL_TEMPLATES, ComponentSpec,
     components_from_template, expert_fit,
 )
+from xps_survey import (
+    analyze_survey, is_survey_scan, ELEMENT_DB,
+)
 
 st.set_page_config(
     page_title="XPS AutoFit",
@@ -35,20 +38,22 @@ st.set_page_config(
         'Report a bug': None,
         'About': """
         ### XPS AutoFit
-        자동화된 XPS 피크 피팅 도구 · v0.4
-        
+        자동화된 XPS 피크 피팅 도구 · v0.5
+
         **공익 목적의 학술 도구**로 개발되었습니다.
         연구·교육·논문 작성에 자유롭게 사용 가능하며,
         결과의 화학적·물리적 타당성은 사용자가 검증해주세요.
-        
+
         **프로젝트 / 코드 / 기여자**
         - Repository: [github.com/suhyeokchoe/xps-autofit](https://github.com/suhyeokchoe/xps-autofit)
         - Authors: [AUTHORS.md](https://github.com/suhyeokchoe/xps-autofit/blob/main/AUTHORS.md)
         - License: MIT
-        
+
         **참고 문헌**
+        - CasaXPS Cookbook (Casa Software Ltd, 2019)
         - Shirley, D. A. (1972). *Phys. Rev. B*, 5(12), 4709
         - Akaike, H. (1974). *IEEE Trans. Auto. Control*, 19(6), 716
+        - NIST X-ray Photoelectron Spectroscopy Database
         """
     }
 )
@@ -57,16 +62,21 @@ st.markdown("""
 <style>
     .main > div { padding-top: 1rem; }
     .stMetric { background: #f0f2f6; padding: 0.8rem; border-radius: 0.5rem; }
+    .conf-high { background: #06a77d; color: white; padding: 2px 8px;
+                  border-radius: 4px; font-size: 0.85em; }
+    .conf-medium { background: #f4a261; color: white; padding: 2px 8px;
+                    border-radius: 4px; font-size: 0.85em; }
+    .conf-low { background: #aaaaaa; color: white; padding: 2px 8px;
+                 border-radius: 4px; font-size: 0.85em; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # =========================================================================
-# 공통 헬퍼 (탭보다 먼저 정의)
+# 공통 헬퍼: Narrow 결과 플롯
 # =========================================================================
-def plot_result(result, meta, container, mode_label=None):
+def plot_narrow_result(result, meta, container, mode_label=None):
     be_p = result['be']; counts_p = result['counts']
-
     colors = ['#e63946', '#457b9d', '#06a77d', '#f4a261',
               '#9b5de5', '#f15bb5', '#00bbf9']
 
@@ -74,14 +84,12 @@ def plot_result(result, meta, container, mode_label=None):
         2, 1, figsize=(12, 7),
         gridspec_kw={'height_ratios': [4, 1]}, sharex=True
     )
-
     ax_main.plot(be_p, counts_p, 'o', mfc='none', mec='black', ms=3,
                   label='Experimental', zorder=3)
     ax_main.plot(be_p, result['background'], '--', color='gray', lw=1,
                   label='BG', zorder=2)
-    total_with_bg = result['background'] + result['y_fit']
-    ax_main.plot(be_p, total_with_bg, '-', color='red', lw=1.5,
-                  label='Envelope', zorder=4)
+    ax_main.plot(be_p, result['background'] + result['y_fit'], '-',
+                  color='red', lw=1.5, label='Envelope', zorder=4)
 
     for i, comp in enumerate(result['components']):
         color = colors[i % len(colors)]
@@ -111,7 +119,7 @@ def plot_result(result, meta, container, mode_label=None):
     plt.tight_layout()
     container.pyplot(fig)
 
-    # 파라미터 테이블
+    # 테이블
     container.subheader("🔢 컴포넌트 파라미터")
     rows = []
     for c in result['components']:
@@ -135,8 +143,7 @@ def plot_result(result, meta, container, mode_label=None):
     container.subheader("💾 다운로드")
     dl1, dl2, dl3 = container.columns(3)
 
-    csv_buf = io.StringIO()
-    df.to_csv(csv_buf, index=False)
+    csv_buf = io.StringIO(); df.to_csv(csv_buf, index=False)
     dl1.download_button("📋 파라미터 CSV", data=csv_buf.getvalue(),
                          file_name=f"{meta['source_file']}_params.csv",
                          mime='text/csv', use_container_width=True,
@@ -144,8 +151,7 @@ def plot_result(result, meta, container, mode_label=None):
 
     be_desc = be_p[::-1]
     curves_dict = {
-        'BE_eV': be_desc,
-        'Counts_exp': counts_p[::-1],
+        'BE_eV': be_desc, 'Counts_exp': counts_p[::-1],
         'Background': result['background'][::-1],
         'Envelope': (result['background'] + result['y_fit'])[::-1],
     }
@@ -153,8 +159,7 @@ def plot_result(result, meta, container, mode_label=None):
         label = c.get('name', c.get('label', 'peak'))
         curves_dict[label] = (result['background'] + c['curve'])[::-1]
     curves_df = pd.DataFrame(curves_dict)
-    curves_buf = io.StringIO()
-    curves_df.to_csv(curves_buf, index=False)
+    curves_buf = io.StringIO(); curves_df.to_csv(curves_buf, index=False)
     dl2.download_button("📊 피팅 곡선 CSV", data=curves_buf.getvalue(),
                          file_name=f"{meta['source_file']}_curves.csv",
                          mime='text/csv', use_container_width=True,
@@ -169,10 +174,184 @@ def plot_result(result, meta, container, mode_label=None):
 
 
 # =========================================================================
+# 공통 헬퍼: Survey 결과 플롯
+# =========================================================================
+def plot_survey_result(result, meta, container):
+    """Survey 분석 결과를 시각화 + 테이블 + 정량 + 다운로드"""
+    be_p = result['be']; counts_p = result['counts']
+
+    # 메트릭
+    n_high = sum(1 for m in result['matches'] if m.confidence == 'high')
+    n_med = sum(1 for m in result['matches'] if m.confidence == 'medium')
+    n_low = sum(1 for m in result['matches'] if m.confidence == 'low')
+    m1, m2, m3, m4 = container.columns(4)
+    m1.metric("검출 피크", len(result['detected_peaks']))
+    m2.metric("High confidence", n_high)
+    m3.metric("Medium", n_med)
+    m4.metric("Low (검증 필요)", n_low)
+
+    # 시각화
+    fig, ax = plt.subplots(figsize=(14, 5))
+    ax.plot(be_p, counts_p, 'k-', lw=0.6)
+    ax.invert_xaxis()
+    ax.set_xlabel('Binding Energy (eV)')
+    ax.set_ylabel('Counts / s')
+    ax.set_title(f"Survey Auto-Analysis — {meta['source_file']}")
+
+    conf_colors = {'high': '#06a77d', 'medium': '#f4a261', 'low': '#aaaaaa'}
+
+    # 검출된 모든 피크에 라인
+    for m in result['matches']:
+        color = conf_colors[m.confidence]
+        for line in m.matched_lines:
+            ax.axvline(line['be_observed'], color=color, alpha=0.4, lw=0.6)
+
+    # 주 피크에 라벨 (강도 큰 순으로 위에서 아래로 배치)
+    sorted_matches = sorted(result['matches'],
+                             key=lambda mm: -mm.primary_line_intensity)
+    label_y_offset_factor = 1.0
+    ymax = counts_p.max()
+    for i, m in enumerate(sorted_matches):
+        color = conf_colors[m.confidence]
+        # 같은 BE에 라벨 겹치지 않도록 약간 변동
+        y_offset = ymax * (0.95 - 0.05 * (i % 3))
+        ax.annotate(
+            f"{m.element}",
+            xy=(m.primary_line_be, m.primary_line_intensity),
+            xytext=(m.primary_line_be, y_offset),
+            fontsize=10, ha='center', color=color, fontweight='bold',
+            bbox=dict(boxstyle='round,pad=0.3', fc='white',
+                       ec=color, lw=0.8),
+            arrowprops=dict(arrowstyle='-', color=color, alpha=0.5, lw=0.5)
+        )
+
+    ax.grid(alpha=0.2)
+    plt.tight_layout()
+    container.pyplot(fig)
+
+    # 식별된 원소 테이블
+    container.subheader("🧪 검출된 원소")
+    rows = []
+    for m in result['matches']:
+        primary_shift = m.matched_lines[0]['be_shift']
+        lines_str = ', '.join([f"{l['name']} @ {l['be_observed']:.1f}"
+                                for l in m.matched_lines])
+        rows.append({
+            'Element': m.element,
+            'Confidence': m.confidence.upper(),
+            'Primary BE (eV)': round(m.primary_line_be, 2),
+            'Charging shift (eV)': f"{primary_shift:+.1f}",
+            'Matched lines': lines_str,
+            '# lines': len(m.matched_lines),
+        })
+    df_elem = pd.DataFrame(rows)
+    container.dataframe(df_elem, use_container_width=True, hide_index=True)
+
+    # 신뢰도 안내
+    with container.expander("ℹ️ Confidence 등급 설명"):
+        st.markdown("""
+- **HIGH** ★ Primary line + 2개 이상의 secondary line이 일관된 시프트로 매칭됨.
+  → 매우 높은 신뢰도. 이 원소는 거의 확실히 샘플에 존재.
+- **MEDIUM** Primary + 1개의 secondary line 매칭.
+  → 합리적 신뢰도. 검증 위해 narrow scan 권장.
+- **LOW** ⚠️ Primary line 1개만 매칭 (다른 원소의 line과 우연히 겹쳤을 수 있음).
+  → **검증 필요**. 가짜 양성 가능성 있음. 다른 secondary line 위치를
+  narrow scan으로 확인하거나, BE 범위 안에 secondary line이 있는지 점검하세요.
+        """)
+
+    # Atomic % 정량
+    container.divider()
+    container.subheader("📊 Approximate Atomic Composition")
+    container.warning(
+        "⚠️ **이 정량값은 근사치입니다.** "
+        "Survey scan 기반 정량은 다음 한계를 가집니다:\n"
+        "- 피크 면적이 아닌 강도(height)만 사용 (배경 보정 단순화)\n"
+        "- Transmission function 보정 미적용\n"
+        "- 같은 원소의 여러 라인 평균화 미적용\n\n"
+        "**정확한 정량을 원하시면**: 각 원소의 narrow scan을 측정하고 "
+        "면적 적분 + Shirley 배경 보정으로 다시 계산하세요. "
+        "이 값은 **상대적 비율의 빠른 추정**으로만 활용하시기 바랍니다."
+    )
+
+    quant = result['quantification']
+    if not quant or all(pct is None for _, pct in quant):
+        container.info("정량 가능한 원소가 없습니다 (RSF 부재 또는 high/medium 매칭 부족).")
+    else:
+        col_pie, col_bar = container.columns([1, 1])
+
+        # 파이 차트
+        labels = []; sizes = []
+        palette = ['#e63946', '#457b9d', '#06a77d', '#f4a261', '#9b5de5',
+                    '#f15bb5', '#00bbf9', '#ffb703']
+        colors = []
+        for i, (m, pct) in enumerate(quant):
+            if pct is not None:
+                labels.append(f"{m.element}\n{pct:.1f}%")
+                sizes.append(pct)
+                colors.append(palette[i % len(palette)])
+        fig_pie, ax_pie = plt.subplots(figsize=(6, 6))
+        ax_pie.pie(sizes, labels=labels, colors=colors,
+                    startangle=90, textprops={'fontsize': 11},
+                    wedgeprops={'edgecolor': 'white', 'linewidth': 1.5})
+        ax_pie.set_title('Approximate Atomic %')
+        col_pie.pyplot(fig_pie)
+
+        # 정량 테이블
+        rows_q = []
+        for m, pct in quant:
+            primary = m.matched_lines[0]
+            rows_q.append({
+                'Element': m.element,
+                'Primary line': primary['name'],
+                'BE (eV)': round(primary['be_observed'], 2),
+                'Intensity': int(primary['intensity']),
+                'RSF': primary.get('rsf', 0),
+                'Atomic %': round(pct, 2) if pct is not None else 'N/A',
+                'Confidence': m.confidence.upper(),
+            })
+        df_q = pd.DataFrame(rows_q)
+        col_bar.dataframe(df_q, use_container_width=True, hide_index=True)
+
+    # 다운로드
+    container.divider()
+    container.subheader("💾 다운로드")
+    dl1, dl2, dl3 = container.columns(3)
+
+    csv_buf = io.StringIO(); df_elem.to_csv(csv_buf, index=False)
+    dl1.download_button("🧪 식별 원소 CSV", data=csv_buf.getvalue(),
+                         file_name=f"{meta['source_file']}_elements.csv",
+                         mime='text/csv', use_container_width=True,
+                         key='dl_survey_elem')
+
+    if quant:
+        df_q_export = pd.DataFrame([{
+            'Element': m.element,
+            'Primary_line': m.matched_lines[0]['name'],
+            'BE_eV': round(m.matched_lines[0]['be_observed'], 2),
+            'Intensity': int(m.matched_lines[0]['intensity']),
+            'RSF': m.matched_lines[0].get('rsf', 0),
+            'Atomic_pct': round(pct, 2) if pct is not None else None,
+            'Confidence': m.confidence,
+        } for m, pct in quant])
+        csv_q_buf = io.StringIO(); df_q_export.to_csv(csv_q_buf, index=False)
+        dl2.download_button("📊 정량 CSV", data=csv_q_buf.getvalue(),
+                             file_name=f"{meta['source_file']}_quantification.csv",
+                             mime='text/csv', use_container_width=True,
+                             key='dl_survey_quant')
+
+    png_buf = io.BytesIO()
+    fig.savefig(png_buf, format='png', dpi=180, bbox_inches='tight')
+    dl3.download_button("🖼️ 플롯 PNG", data=png_buf.getvalue(),
+                         file_name=f"{meta['source_file']}_survey.png",
+                         mime='image/png', use_container_width=True,
+                         key='dl_survey_png')
+
+
+# =========================================================================
 # 제목
 # =========================================================================
 st.title("📊 XPS AutoFit")
-st.caption("자동 XPS 피팅 · v0.4 · Expert 모드로 논문 수준 피팅 지원")
+st.caption("자동 XPS 피팅 · v0.5 · Survey scan 자동 분석 추가")
 
 
 # =========================================================================
@@ -196,27 +375,34 @@ with st.sidebar:
 
 
 # =========================================================================
-# 업로드 전 안내
+# 업로드 전
 # =========================================================================
 if uploaded is None:
     st.info("👈 사이드바에서 XPS 데이터 파일을 업로드하세요.")
-    with st.expander("🆕 v0.4 업데이트 — Expert 모드", expanded=True):
+    with st.expander("🆕 v0.5 업데이트 — Survey 자동 분석", expanded=True):
         st.markdown("""
-**v0.4의 핵심: Expert 모드**
+**v0.5의 핵심: Survey scan 자동 분석**
 
-자동 감지만으로 피팅이 어려운 데이터(예: MOF O1s처럼 여러 화학결합이 겹친 경우)를
-전문가 수준으로 피팅하는 새 기능입니다.
+지금까지는 narrow scan만 다뤘는데, 이제 **survey scan**도 자동 처리합니다:
+- **자동 모드**: 데이터 BE 범위가 500 eV 이상이면 자동으로 Survey 분석으로 분기
+- **별도 Survey 탭**: 명시적으로 Survey 분석을 원할 때
 
-1. **재료 템플릿 선택** → MOF, Metal oxide, Polymer 등
-2. **컴포넌트 자동 제안** → 해당 재료의 전형적인 피크들
-3. **제약 옵션**: 위치 고정 / FWHM 공유 / η 공유
-4. **정직한 결과**: 데이터가 지지하지 않는 피크는 면적이 작게 나옴
+**Survey 분석 기능**:
+1. 피크 자동 검출 (1차 미분 + prominence)
+2. **다중 라인 자기일관성 매칭** — 단일 피크 매칭의 가짜 양성 방지
+3. 충전(charging) 시프트 자동 처리
+4. 신뢰도 등급 (HIGH / MEDIUM / LOW)
+5. **근사 atomic %** 정량 (Scofield RSF 기반)
 
-#### 지원 재료 템플릿
-""")
-        for k, v in MATERIAL_TEMPLATES.items():
-            comps = ", ".join([c['name'] for c in v['components']])
-            st.markdown(f"- **{k}** ({v['region']}): {comps}")
+지원 원소: Li, B, C, N, O, F, Na, Mg, Al, Si, P, S, Cl, K, Ca,
+Ti, Cr, Mn, Fe, Co, Ni, Cu, Zn, Ga, As, Mo, Ag, In, Sn, Hf, Ta, W, Pt, Au
+        """)
+    with st.expander("🔬 v0.4 — Expert 모드 (Narrow)"):
+        st.markdown("""
+- 재료 템플릿 기반 제약 피팅
+- 위치 고정 / FWHM 공유 / η 공유 옵션
+- 정직한 결과 (데이터가 지지하지 않는 컴포넌트는 면적 작게)
+        """)
     st.stop()
 
 
@@ -235,11 +421,13 @@ if apply_cal and cal_shift != 0:
     be = calibrate_shift(be, cal_shift)
     meta['calibrated'] = f"shift={cal_shift:+.2f} eV"
 
+# 자동 분기 결정
+auto_is_survey = is_survey_scan(be)
 region_detected = meta.get('region', 'unknown')
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("파일", meta['source_file'])
-col2.metric("감지된 region", region_detected)
+col2.metric("타입", "Survey" if auto_is_survey else "Narrow")
 col3.metric("Points", len(be))
 col4.metric("BE 범위", f"{be.max():.1f} → {be.min():.1f} eV")
 
@@ -247,118 +435,136 @@ col4.metric("BE 범위", f"{be.max():.1f} → {be.min():.1f} eV")
 # =========================================================================
 # 모드 탭
 # =========================================================================
-tab_auto, tab_expert = st.tabs(["🤖 자동 모드", "🔬 Expert 모드"])
+tab_auto, tab_expert, tab_survey = st.tabs(
+    ["🤖 자동 모드", "🔬 Expert 모드 (Narrow)", "🌐 Survey 분석"]
+)
 
 
 # -------------------------------------------------------------------
-# 자동 모드
+# 자동 모드 — 자동 분기
 # -------------------------------------------------------------------
 with tab_auto:
-    st.markdown("AIC 기반 자동 피크 개수 선택 + singlet/doublet 자동 분기")
+    if auto_is_survey:
+        st.success(
+            "📡 **Survey scan으로 자동 감지되어 원소 자동 식별 모드로 전환합니다.** "
+            "(BE 범위 500 eV 이상)"
+        )
+        with st.spinner("Survey 분석 중..."):
+            result = analyze_survey(be, counts)
 
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        all_regions = ['auto'] + list(ELEMENT_PRIORS.keys()) + list(DOUBLET_PRIORS.keys())
-        region_override = st.selectbox("Region", all_regions, index=0)
-    with col_b:
-        max_peaks = st.slider("최대 탐색 피크 수", 1, 6, 3)
-    with col_c:
-        manual_n = st.number_input("수동 지정 (0=자동)", 0, 6, 0)
-
-    force_singlet = st.checkbox("Doublet 강제 해제 (singlet만)", value=False)
-
-    eff_meta = dict(meta)
-    if region_override != 'auto':
-        eff_meta['region'] = region_override
-    if force_singlet and eff_meta.get('region') in DOUBLET_PRIORS:
-        eff_meta['region'] = 'unknown'
-
-    with st.spinner("피팅 중..."):
-        if manual_n == 0:
-            result = auto_fit_v3(be, counts, eff_meta, max_peaks=max_peaks)
+        if not result['success']:
+            st.error(f"분석 실패: {result['reason']}")
         else:
-            bg = shirley_background(be, counts)
-            y_corr = counts - bg
-            peaks_idx, _ = detect_peaks_v2(be, y_corr, eff_meta.get('region'))
-            if len(peaks_idx) == 0:
-                st.error("피크 감지 실패"); st.stop()
-            init_centers = sorted([float(be[i]) for i in peaks_idx])
-            ranked = sorted(init_centers,
-                            key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
-            centers = sorted(ranked[:manual_n])
-            while len(centers) < manual_n:
-                centers.append(centers[-1] - 1.5 if centers else float(be[np.argmax(y_corr)]))
+            plot_survey_result(result, meta, st)
 
-            if is_doublet(eff_meta.get('region')) and not force_singlet:
-                fit = fit_n_doublets(be, y_corr, manual_n, centers, eff_meta['region'])
-                _, _, _, _, dBE, ar = DOUBLET_PRIORS[eff_meta['region']]
-                components = []
-                for i in range(manual_n):
-                    amp_m, c_m, fwhm, eta = fit['popt'][i*4:i*4+4]
-                    cm = pseudo_voigt(be, amp_m, c_m, fwhm, eta)
-                    components.append({
-                        'amplitude': float(amp_m), 'position': float(c_m),
-                        'fwhm': float(fwhm), 'eta': float(eta),
-                        'area': float(abs(np.trapezoid(cm, be))),
-                        'curve': cm, 'label': f'State {i+1} (main)'})
-                    cn = pseudo_voigt(be, amp_m/ar, c_m+dBE, fwhm, eta)
-                    components.append({
-                        'amplitude': float(amp_m/ar), 'position': float(c_m+dBE),
-                        'fwhm': float(fwhm), 'eta': float(eta),
-                        'area': float(abs(np.trapezoid(cn, be))),
-                        'curve': cn, 'label': f'State {i+1} (minor)'})
-            else:
-                fit = fit_n_peaks(be, y_corr, manual_n, centers, eff_meta.get('region'))
-                if fit is None:
-                    st.error(f"{manual_n}개 피팅 실패"); st.stop()
-                components = []
-                for i in range(manual_n):
-                    a, c, f, e = fit['popt'][i*4:i*4+4]
-                    comp = pseudo_voigt(be, a, c, f, e)
-                    components.append({
-                        'amplitude': float(a), 'position': float(c),
-                        'fwhm': float(f), 'eta': float(e),
-                        'area': float(abs(np.trapezoid(comp, be))),
-                        'curve': comp, 'label': f'Peak {i+1}'})
-            components.sort(key=lambda c: -c['position'])
-            for i, c in enumerate(components):
-                if c['label'].startswith('Peak '):
-                    c['label'] = f'Peak {i+1}'
-            tot = sum(c['area'] for c in components) or 1
-            for c in components:
-                c['area_pct'] = 100 * c['area'] / tot
-            result = {
-                'success': True,
-                'mode': 'doublet' if is_doublet(eff_meta.get('region')) and not force_singlet else 'singlet',
-                'be': be, 'counts': counts, 'background': bg,
-                'y_fit': fit['y_fit'], 'components': components,
-                'r_squared': fit['r2'], 'rms': fit['rms'], 'aic': fit['aic'],
-                'n_peaks': manual_n, 'trials': None,
-                'doublet_info': None,
-            }
-
-    if not result['success']:
-        st.error(f"피팅 실패: {result['reason']}")
     else:
-        mode_info = f"{result['n_peaks']}개 " + (
-            '상태(doublet)' if result['mode'] == 'doublet' else '피크')
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("모델", mode_info)
-        m2.metric("R²", f"{result['r_squared']:.4f}")
-        m3.metric("RMS", f"{result['rms']:.1f}")
-        m4.metric("AIC", f"{result['aic']:.1f}")
+        # ---- Narrow 자동 모드 (v0.4와 동일) ----
+        st.markdown("AIC 기반 자동 피크 개수 선택 + singlet/doublet 자동 분기")
 
-        plot_result(result, meta, st, mode_label='auto')
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            all_regions = ['auto'] + list(ELEMENT_PRIORS.keys()) + list(DOUBLET_PRIORS.keys())
+            region_override = st.selectbox("Region", all_regions, index=0)
+        with col_b:
+            max_peaks = st.slider("최대 탐색 피크 수", 1, 6, 3)
+        with col_c:
+            manual_n = st.number_input("수동 지정 (0=자동)", 0, 6, 0)
+
+        force_singlet = st.checkbox("Doublet 강제 해제 (singlet만)", value=False)
+
+        eff_meta = dict(meta)
+        if region_override != 'auto':
+            eff_meta['region'] = region_override
+        if force_singlet and eff_meta.get('region') in DOUBLET_PRIORS:
+            eff_meta['region'] = 'unknown'
+
+        with st.spinner("피팅 중..."):
+            if manual_n == 0:
+                result = auto_fit_v3(be, counts, eff_meta, max_peaks=max_peaks)
+            else:
+                bg = shirley_background(be, counts)
+                y_corr = counts - bg
+                peaks_idx, _ = detect_peaks_v2(be, y_corr, eff_meta.get('region'))
+                if len(peaks_idx) == 0:
+                    st.error("피크 감지 실패"); st.stop()
+                init_centers = sorted([float(be[i]) for i in peaks_idx])
+                ranked = sorted(init_centers,
+                                key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
+                centers = sorted(ranked[:manual_n])
+                while len(centers) < manual_n:
+                    centers.append(centers[-1] - 1.5 if centers else float(be[np.argmax(y_corr)]))
+                if is_doublet(eff_meta.get('region')) and not force_singlet:
+                    fit = fit_n_doublets(be, y_corr, manual_n, centers, eff_meta['region'])
+                    _, _, _, _, dBE, ar = DOUBLET_PRIORS[eff_meta['region']]
+                    components = []
+                    for i in range(manual_n):
+                        amp_m, c_m, fwhm, eta = fit['popt'][i*4:i*4+4]
+                        cm = pseudo_voigt(be, amp_m, c_m, fwhm, eta)
+                        components.append({
+                            'amplitude': float(amp_m), 'position': float(c_m),
+                            'fwhm': float(fwhm), 'eta': float(eta),
+                            'area': float(abs(np.trapezoid(cm, be))),
+                            'curve': cm, 'label': f'State {i+1} (main)'})
+                        cn = pseudo_voigt(be, amp_m/ar, c_m+dBE, fwhm, eta)
+                        components.append({
+                            'amplitude': float(amp_m/ar), 'position': float(c_m+dBE),
+                            'fwhm': float(fwhm), 'eta': float(eta),
+                            'area': float(abs(np.trapezoid(cn, be))),
+                            'curve': cn, 'label': f'State {i+1} (minor)'})
+                else:
+                    fit = fit_n_peaks(be, y_corr, manual_n, centers, eff_meta.get('region'))
+                    if fit is None:
+                        st.error(f"{manual_n}개 피팅 실패"); st.stop()
+                    components = []
+                    for i in range(manual_n):
+                        a, c, f, e = fit['popt'][i*4:i*4+4]
+                        comp = pseudo_voigt(be, a, c, f, e)
+                        components.append({
+                            'amplitude': float(a), 'position': float(c),
+                            'fwhm': float(f), 'eta': float(e),
+                            'area': float(abs(np.trapezoid(comp, be))),
+                            'curve': comp, 'label': f'Peak {i+1}'})
+                components.sort(key=lambda c: -c['position'])
+                for i, c in enumerate(components):
+                    if c['label'].startswith('Peak '):
+                        c['label'] = f'Peak {i+1}'
+                tot = sum(c['area'] for c in components) or 1
+                for c in components:
+                    c['area_pct'] = 100 * c['area'] / tot
+                result = {
+                    'success': True,
+                    'mode': 'doublet' if is_doublet(eff_meta.get('region')) and not force_singlet else 'singlet',
+                    'be': be, 'counts': counts, 'background': bg,
+                    'y_fit': fit['y_fit'], 'components': components,
+                    'r_squared': fit['r2'], 'rms': fit['rms'], 'aic': fit['aic'],
+                    'n_peaks': manual_n, 'trials': None, 'doublet_info': None,
+                }
+
+        if not result['success']:
+            st.error(f"피팅 실패: {result['reason']}")
+        else:
+            mode_info = (f"{result['n_peaks']}개 " +
+                          ('상태(doublet)' if result['mode'] == 'doublet' else '피크'))
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("모델", mode_info)
+            mc2.metric("R²", f"{result['r_squared']:.4f}")
+            mc3.metric("RMS", f"{result['rms']:.1f}")
+            mc4.metric("AIC", f"{result['aic']:.1f}")
+            plot_narrow_result(result, meta, st, mode_label='auto')
 
 
 # -------------------------------------------------------------------
-# Expert 모드
+# Expert 모드 (v0.4와 동일, narrow 전용)
 # -------------------------------------------------------------------
 with tab_expert:
-    st.markdown("#### 🔬 Expert 모드 — 재료 기반 제약 피팅")
-    st.caption("논문 수준의 피팅이 필요할 때. 재료 템플릿 선택 → 컴포넌트 편집 → 피팅.")
+    if auto_is_survey:
+        st.warning(
+            "⚠️ 업로드한 데이터는 Survey scan으로 보입니다 (BE 범위 500 eV 이상). "
+            "Expert 모드는 narrow scan용입니다. **Survey 분석** 탭을 사용하세요."
+        )
+    st.markdown("#### 🔬 Expert 모드 — 재료 기반 제약 피팅 (Narrow scan용)")
+    st.caption("논문 수준의 피팅. 재료 템플릿 선택 → 컴포넌트 편집 → 피팅.")
 
-    # 템플릿 선택
     col_t1, col_t2 = st.columns([2, 3])
     with col_t1:
         filtered = {k: v for k, v in MATERIAL_TEMPLATES.items()
@@ -366,15 +572,12 @@ with tab_expert:
         if not filtered:
             filtered = MATERIAL_TEMPLATES
         template_name = st.selectbox(
-            "재료 템플릿",
-            options=list(filtered.keys()),
-            key='exp_template'
+            "재료 템플릿", options=list(filtered.keys()), key='exp_template'
         )
     with col_t2:
         tmpl = MATERIAL_TEMPLATES[template_name]
         st.info(f"**{tmpl['description']}**  \n참조: *{tmpl['reference']}*")
 
-    # 옵션 컴포넌트
     selected_optional = []
     if tmpl.get('optional_components'):
         st.markdown("**옵션 컴포넌트**")
@@ -389,10 +592,7 @@ with tab_expert:
 
     base_comps = components_from_template(template_name, selected_optional)
 
-    # 컴포넌트 편집
     st.markdown("#### 컴포넌트 상세 설정")
-    st.caption("각 컴포넌트의 위치/FWHM 범위/고정 여부를 조정할 수 있습니다.")
-
     edited_comps = []
     for i, c in enumerate(base_comps):
         with st.expander(f"**{c.name}** @ {c.be} eV", expanded=False):
@@ -403,11 +603,8 @@ with tab_expert:
                     "BE 중심 (eV)", value=float(c.be), step=0.05, format="%.2f",
                     key=f"be_{ukey}"
                 )
-                lock_pos = st.checkbox(
-                    "위치 완전 고정", value=False,
-                    key=f"lock_{ukey}",
-                    help="체크하면 BE가 정확히 고정됨"
-                )
+                lock_pos = st.checkbox("위치 완전 고정", value=False,
+                                         key=f"lock_{ukey}")
             with cc2:
                 be_tol = st.number_input(
                     "BE 이동 ± (eV)", value=float(c.be_tol),
@@ -416,56 +613,36 @@ with tab_expert:
                 )
                 fwhm_min = st.number_input(
                     "FWHM 최소 (eV)", value=float(c.fwhm_min),
-                    min_value=0.3, step=0.1, format="%.1f",
-                    key=f"fmin_{ukey}"
+                    min_value=0.3, step=0.1, format="%.1f", key=f"fmin_{ukey}"
                 )
             with cc3:
                 fwhm_max = st.number_input(
                     "FWHM 최대 (eV)", value=float(c.fwhm_max),
-                    min_value=0.4, step=0.1, format="%.1f",
-                    key=f"fmax_{ukey}"
+                    min_value=0.4, step=0.1, format="%.1f", key=f"fmax_{ukey}"
                 )
-
             edited_comps.append(ComponentSpec(
                 name=c.name, be=be_center, be_tol=be_tol,
                 fwhm_min=fwhm_min, fwhm_max=fwhm_max,
                 lock_position=lock_pos
             ))
 
-    # 전역 제약
     st.markdown("#### 전역 제약")
     gc1, gc2, gc3 = st.columns(3)
     with gc1:
-        share_fwhm = st.checkbox(
-            "모든 컴포넌트 FWHM 공유", value=False,
-            help="같은 재료의 모든 피크가 같은 FWHM을 가진다고 가정"
-        )
+        share_fwhm = st.checkbox("모든 컴포넌트 FWHM 공유", value=False)
     with gc2:
-        share_eta = st.checkbox(
-            "모든 컴포넌트 η 공유", value=False,
-            help="모든 피크가 같은 Gauss-Lorentz 비율"
-        )
+        share_eta = st.checkbox("모든 컴포넌트 η 공유", value=False)
     with gc3:
-        use_shirley_exp = st.checkbox(
-            "Shirley 배경 보정", value=True,
-            help="논문 데이터처럼 배경이 이미 제거된 경우 해제"
-        )
+        use_shirley_exp = st.checkbox("Shirley 배경 보정", value=True)
 
-    # 자유 파라미터 추정
-    n_params = 0
-    for c in edited_comps:
-        n_params += 1
-        if not c.lock_position: n_params += 1
-        if not share_fwhm: n_params += 1
-        if not share_eta: n_params += 1
-    if share_fwhm: n_params += 1
-    if share_eta: n_params += 1
-    st.caption(f"📊 자유 파라미터 ≈ **{n_params}개**  "
-               f"(완전자유: {4*len(edited_comps)}, 최대제약: {len(edited_comps)+2})")
+    n_params = sum(1 + (0 if c.lock_position else 1)
+                    + (0 if share_fwhm else 1)
+                    + (0 if share_eta else 1) for c in edited_comps)
+    n_params += (1 if share_fwhm else 0) + (1 if share_eta else 0)
+    st.caption(f"📊 자유 파라미터 ≈ **{n_params}개**")
 
-    # 피팅
     fit_btn = st.button("🎯 Expert 피팅 실행", type='primary',
-                         use_container_width=True)
+                          use_container_width=True)
 
     if fit_btn:
         with st.spinner("제약 피팅 중..."):
@@ -474,7 +651,6 @@ with tab_expert:
                 share_fwhm=share_fwhm, share_eta=share_eta,
                 use_shirley=use_shirley_exp
             )
-
         if not exp_result['success']:
             st.error(f"피팅 실패: {exp_result['reason']}")
         else:
@@ -483,67 +659,108 @@ with tab_expert:
             em2.metric("R²", f"{exp_result['r_squared']:.4f}")
             em3.metric("자유 파라미터", exp_result['n_free_params'])
             em4.metric("AIC", f"{exp_result['aic']:.1f}")
-
             if exp_result.get('shared_fwhm_value'):
-                st.info(f"🔗 공유 FWHM: {exp_result['shared_fwhm_value']:.3f} eV  "
-                         + (f"|  공유 η: {exp_result['shared_eta_value']:.3f}"
-                            if exp_result.get('shared_eta_value') is not None else ""))
+                st.info(f"🔗 공유 FWHM: {exp_result['shared_fwhm_value']:.3f} eV")
+            plot_narrow_result(exp_result, meta, st, mode_label='expert')
 
-            plot_result(exp_result, meta, st, mode_label='expert')
-
-            # 정직성 체크
             tiny = [c for c in exp_result['components'] if c['area_pct'] < 5]
             if tiny:
                 names = ", ".join([f"{c['name']} ({c['area_pct']:.1f}%)" for c in tiny])
                 st.warning(
                     f"⚠️ **정직성 체크**: {names} — 면적 5% 미만. "
-                    f"데이터가 이 컴포넌트를 실제로 지지하지 않을 수 있습니다. "
-                    f"제거하고 재피팅을 고려해보세요."
+                    f"데이터가 이 컴포넌트를 실제로 지지하지 않을 수 있습니다."
                 )
+
+
+# -------------------------------------------------------------------
+# Survey 탭 (명시적)
+# -------------------------------------------------------------------
+with tab_survey:
+    if not auto_is_survey:
+        st.warning(
+            "⚠️ 업로드한 데이터는 Narrow scan으로 보입니다 (BE 범위 500 eV 미만). "
+            "Survey 분석은 일반적으로 0~1400 eV 정도의 wide scan에 적합합니다. "
+            "그래도 아래에서 분석을 시도할 수 있지만, 결과가 의미 없을 수 있습니다."
+        )
+
+    st.markdown("#### 🌐 Survey 분석 — 원소 자동 식별 + 근사 정량")
+    st.caption(
+        "다중 라인 자기일관성 검증으로 원소를 식별합니다. "
+        "충전(charging) 시프트는 자동으로 흡수됩니다."
+    )
+
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        tolerance = st.slider(
+            "Primary line tolerance (eV)", 1.0, 8.0, 4.0, 0.5,
+            help="검출 피크가 DB 위치에서 얼마나 벗어나도 매칭으로 인정할지. "
+                 "충전이 큰 샘플은 6~8 eV로."
+        )
+    with col_s2:
+        min_prominence = st.slider(
+            "피크 검출 민감도 (%)", 1.0, 10.0, 2.0, 0.5,
+            help="작을수록 약한 피크도 잡힘. 노이즈가 많으면 4~5%로 올리세요."
+        ) / 100.0
+
+    run_survey = st.button("🌐 Survey 분석 실행", type='primary',
+                             use_container_width=True, key='run_survey_btn')
+
+    if run_survey or auto_is_survey:
+        with st.spinner("Survey 분석 중..."):
+            # 임시: prominence 조절을 위해 직접 호출
+            from xps_survey import detect_survey_peaks, identify_elements, quantify_atomic_percent
+            detected, bg = detect_survey_peaks(be, counts,
+                                                  prominence_ratio=min_prominence)
+            if not detected:
+                st.error("피크 감지 실패. 검출 민감도를 낮춰보세요.")
+            else:
+                matches = identify_elements(detected, (be.min(), be.max()),
+                                              tolerance_ev=tolerance)
+                quant = quantify_atomic_percent(matches,
+                                                  only_high_confidence=True)
+                survey_result = {
+                    'success': True, 'mode': 'survey',
+                    'be': be, 'counts': counts, 'background': bg,
+                    'detected_peaks': detected,
+                    'matches': matches,
+                    'quantification': quant,
+                    'n_elements': len([m for m in matches if m.confidence != 'low']),
+                }
+                plot_survey_result(survey_result, meta, st)
+
+
 # =========================================================================
-# 푸터: 면책조항 + 데이터 정책 + 인용 안내
+# 푸터: 면책조항 + 데이터 정책 (v0.4 그대로)
 # =========================================================================
 st.divider()
-
-footer_col1, footer_col2 = st.columns(2)
-
-with footer_col1:
+fc1, fc2 = st.columns(2)
+with fc1:
     with st.expander("⚖️ 이용 시 주의사항", expanded=False):
         st.markdown("""
-자유 이용 정책 : 
-이 도구는 공익 목적의 학술 도구입니다.
-연구, 교육, 논문 작성, 학회 발표 등에 자유롭게 사용 가능합니다.
+**자유 이용 정책**
+공익 목적의 학술 도구입니다. 연구·교육·논문에 자유롭게 사용 가능합니다.
 
-결과 검증 의무 : 
-자동 피팅 결과는 통계적 최적해이며, 화학적·물리적 타당성은
-사용자가 도메인 지식으로 직접 검증해야 합니다. 본 도구의 결과를
-근거로 한 의사결정·출판물·산업적 응용에 대한 책임은 사용자에게 있습니다.
+**결과 검증 의무**
+자동 결과는 통계적 최적해입니다. 화학적·물리적 타당성은 사용자가 도메인
+지식으로 검증해야 합니다.
 
-알려진 한계
-- F1s, C1s, O1s 등 일반적 region에 최적화되어 있습니다.
-- 비대칭 라인쉐입(LA, DS) 미지원합니다. 이용자가 많아지면 그때 고려해보겠습니다....
-- 화학상태 자동 라벨링은 도메인 prior 기반 (절대 정답 아님!)
+**알려진 한계**
+- Survey 정량은 근사치 (Scofield RSF 기반, 면적이 아닌 강도)
+- 비대칭 라인쉐입(LA, DS) 미지원
+- 화학상태 자동 라벨링은 도메인 prior 기반
 """)
-
-with footer_col2:
+with fc2:
     with st.expander("🔒 데이터 처리 정책", expanded=False):
         st.markdown("""
-데이터 보호
-- 업로드된 XPS 데이터는 서버 메모리에서만 처리됩니다.
-- 세션 종료 시 데이터는 자동 삭제되며, 별도 저장소에 보관하지 않습니다.
-- 어떤 형태의 사용자 식별정보도 수집하지 않습니다.
-
-익명 통계
-- Streamlit Cloud에서 익명 접속 통계가 자동 수집될 수 있으나,
-  본 도구가 별도로 사용자 데이터를 추적하지 않습니다.
-
-버그 / 기능 제안
-- GitHub Issues 또는 'Manage app'을 통해 전달해주세요. 감사합니다.
+**데이터 보호**
+- 업로드된 데이터는 서버 메모리에서만 처리됩니다.
+- 세션 종료 시 데이터는 자동 삭제됩니다.
+- 사용자 식별정보를 수집하지 않습니다.
 """)
 
 st.markdown(
     "<div style='text-align:center; color:#888; padding:1rem 0; font-size:0.85em;'>"
-    "XPS AutoFit · v0.4 · 결과는 항상 도메인 지식으로 검증하세요."
+    "XPS AutoFit · v0.5 · 결과는 항상 도메인 지식으로 검증하세요."
     "</div>",
     unsafe_allow_html=True
 )
