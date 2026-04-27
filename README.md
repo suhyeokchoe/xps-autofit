@@ -1,119 +1,115 @@
-# XPS AutoFit — 실행 & 배포 가이드
+# 📊 XPS AutoFit
+
+> 자동화된 XPS 피크 피팅 웹 도구 · 공익 목적의 학술 도구
+
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B)](https://xps-autofit-suhyeok.streamlit.app)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org)
+
+XPS(X-ray Photoelectron Spectroscopy) 데이터를 업로드하면 자동으로
+배경 제거 · 피크 감지 · 라인쉐입 피팅을 수행합니다. CasaXPS와 같은
+상용 도구의 대안으로 학부생 · 대학원생 · 연구자가 무료로 사용할 수 있는
+공익 목적의 도구를 지향합니다.
 
 ---
 
-## 📦 이 폴더에 들어있는 파일
+## 🚀 Live Demo
 
-| 파일 | 역할 |
-|---|---|
-| `xps_engine.py` | 피팅 코어 엔진 (Shirley, Voigt, AIC 모델 선택) |
-| `app.py` | Streamlit 웹앱 UI |
-| `requirements.txt` | Python 의존성 |
-| `README.md` | 이 문서 |
+**👉 [https://xps-autofit-suhyeok.streamlit.app](https://xps-autofit-suhyeok.streamlit.app)**
+
+브라우저에서 즉시 사용 가능. 설치 불필요.
 
 ---
 
-## 🖥️ Step 1: 로컬에서 실행해보기 (5분)
+## ✨ 주요 기능
 
-### Windows (Anaconda 권장)
+### 🤖 자동 모드
+- **Shirley 배경 보정** (iterative)
+- **자동 피크 감지** (1차 + 2차 미분 기반 shoulder 검출)
+- **AIC 기반 모델 선택**으로 과적합 방지
+- **스핀-오빗 doublet 자동 처리** (Sn 3d, Cu 2p 등 15종 원소)
 
-```bash
-# 1. Anaconda Prompt 열기
-# 2. 폴더로 이동
-cd 경로/XPS_AutoFit
+### 🔬 Expert 모드
+- **재료 템플릿 라이브러리**: MOF, Metal oxide, Polymer, Graphite 등
+- **제약 옵션**: 위치 고정, FWHM 공유, η 공유
+- **자유도 5~12 조절** 가능 → 논문 수준 피팅
+- **정직성 체크**: 데이터가 지지하지 않는 컴포넌트는 면적이 작게 표시
 
-# 3. 필수 라이브러리 설치 (한 번만)
-pip install -r requirements.txt
-
-# 4. 앱 실행
-streamlit run app.py
-```
-
-브라우저가 자동으로 열리고 `http://localhost:8501`에 앱이 뜹니다.
-
-### macOS / Linux
-
-```bash
-cd 경로/XPS_AutoFit
-pip3 install -r requirements.txt
-streamlit run app.py
-```
+### 📊 결과 export
+- 파라미터 CSV
+- 피팅 곡선 CSV
+- 고해상도 PNG
 
 ---
 
-## 🧪 Step 2: 테스트
+## 🧪 지원 Region
 
-1. 웹 UI에서 사이드바의 **"CSV 또는 TXT 파일"** 클릭
-2. 업로드했던 `1.csv`, `2.csv`, `3.csv`, `4.csv` 중 하나 선택
-   - (원본이 .xls면 Excel에서 `다른 이름으로 저장` → `CSV(.csv)`)
-3. 자동 피팅 결과 확인
-4. 좌측 사이드바에서 **"피크 수 수동 지정"** 바꿔서 영향 관찰
-5. 하단 **다운로드 버튼**으로 결과 저장
-
----
-
-## 🚀 Step 3: 웹에 배포하기 — Streamlit Cloud (무료, 가장 쉬움)
-
-### 3-1. GitHub 준비
-1. GitHub 계정 (없으면 github.com에서 가입)
-2. 새 저장소 생성 → 이름: `xps-autofit` (private 가능)
-3. 이 폴더의 **파일 4개** (`app.py`, `xps_engine.py`, `requirements.txt`, `README.md`) 업로드
-   - 초보자면 **GitHub Desktop** 앱 쓰면 드래그&드롭 가능
-
-### 3-2. Streamlit Cloud 배포
-1. https://share.streamlit.io 접속 → GitHub으로 로그인
-2. `New app` 클릭
-3. 폼 작성:
-   - Repository: `본인아이디/xps-autofit`
-   - Branch: `main`
-   - Main file path: `app.py`
-4. `Deploy` 클릭
-5. 1~2분 후 `https://본인아이디-xps-autofit.streamlit.app` 같은 URL이 나옴
-6. **그 URL을 누구에게든 공유 가능**
-
-> 💡 **Tip**: 무료 플랜은 30일 inactive시 sleep. 한 달에 한 번 열면 계속 유지됨. 도메인 연결, password 보호는 유료. 초기엔 무료면 충분.
+| Region | Singlet | Doublet |
+|---|---|---|
+| s-orbital | F1s, C1s, O1s, N1s | — |
+| 2p (ratio 2:1) | — | Cu, Ti, Si, Fe, Ni |
+| 3d (ratio 3:2) | — | Sn, In, Mo, Ag |
+| 4f (ratio 4:3) | — | Au, W |
 
 ---
 
-## 🛠️ Step 4 (선택): Render.com 배포 — 더 유연한 옵션
+## 📖 사용법
 
-Streamlit Cloud가 마음에 안 들면:
+1. 사이드바에서 **CSV 파일 업로드** (CasaXPS export 또는 2열 BE/Counts CSV)
+2. **자동 모드** 또는 **Expert 모드** 선택
+3. (Expert 모드) 재료 템플릿 선택 → 컴포넌트 편집 → 제약 옵션 설정
+4. 피팅 실행 → 결과 확인 → CSV/PNG 다운로드
 
-1. https://render.com 가입 (GitHub 연동)
-2. `New +` → `Web Service` → GitHub 저장소 연결
-3. 설정:
-   - **Build command**: `pip install -r requirements.txt`
-   - **Start command**: `streamlit run app.py --server.port $PORT --server.address 0.0.0.0`
-   - Plan: **Free**
-4. 배포 완료 → `https://xps-autofit.onrender.com` 같은 URL
-
-> ⚠️ Render 무료 티어는 15분 inactive시 sleep, 첫 요청이 느림(cold start ~30초).
+> ⚠️ **`.xls` 파일은 Excel에서 `다른 이름으로 저장` → CSV로 변환 후 업로드하세요.**
 
 ---
 
-## 🐛 문제 해결
+## 🛠️ 기술 스택
 
-| 증상 | 해결 |
-|---|---|
-| `streamlit: command not found` | `pip install streamlit` 다시 |
-| `ModuleNotFoundError: xps_engine` | `app.py`와 `xps_engine.py`가 같은 폴더인지 확인 |
-| 한글 깨짐 | CSV 저장 시 UTF-8 인코딩 선택 |
-| 업로드 후 "데이터 행 없음" | CSV 구조 확인. BE는 1번째 열, Counts는 3번째 열(CasaXPS 기본) |
-| 배포 앱이 안 뜸 | Streamlit Cloud 로그 탭 확인 (`Manage app` → `Logs`) |
+- **Python** 3.11+
+- **Streamlit** — 웹 UI
+- **NumPy / SciPy** — 수치 연산 및 비선형 최소제곱
+- **Matplotlib / Pandas** — 시각화 및 데이터 처리
 
----
-
-## 📝 앞으로의 로드맵 (2~4주차)
-
-- **2주차**: 스핀-오빗 doublet 자동 처리 (Sn 3d, Cu 2p 등)
-- **3주차**: NIST XPS DB 기반 화학상태 라이브러리 매칭
-- **4주차**: Multi-file 비교, constraint UI (peak area ratio lock 등)
+핵심 알고리즘:
+- Shirley iterative background
+- Pseudo-Voigt (= CasaXPS의 SGL) 라인쉐입
+- Levenberg-Marquardt 비선형 최소제곱
+- Akaike Information Criterion (AIC) 모델 선택
 
 ---
 
-## ⚠️ 사용 시 주의사항
+## ⚖️ 이용 정책
 
-1. **자동 피팅 결과는 절대 "진리"가 아닙니다.** 화학자/본인의 도메인 지식으로 검증하세요.
-2. **R² 높다고 옳은 모델 아닙니다.** AIC, residual 패턴, 물리적 합당성을 함께 보세요.
-3. **F1s (s-orbital)**만 우선 최적화됨. 3d, 2p 같은 doublet 데이터는 Phase 1에서 지원 예정.
-4. 업로드된 데이터는 **서버 메모리에서만 처리**되고 저장되지 않음.
+이 도구는 **공익 목적의 학술 도구**입니다.
+- ✅ 연구·교육·논문 작성에 자유롭게 사용 가능
+- ✅ 출판물에 결과 사용 시 별도 허가 불필요 (인용은 환영)
+- ⚠️ 자동 피팅 결과는 **반드시 도메인 지식으로 검증**하세요
+- ⚠️ R²가 높다고 올바른 모델이 아닙니다 (overfitting 주의)
+
+업로드된 데이터는 서버 메모리에서만 처리되며, 세션 종료 시 자동 삭제됩니다.
+
+---
+
+## 🤝 Authors & Contributors
+
+상세 내용은 [AUTHORS.md](./AUTHORS.md) 참조.
+
+---
+
+## 📚 References
+
+- CasaXPS Cookbook (Casa Software Ltd, 2019)
+- Shirley, D. A. (1972). High-resolution X-ray photoemission spectrum of the valence bands of gold. *Phys. Rev. B*, 5(12), 4709.
+- Akaike, H. (1974). A new look at the statistical model identification. *IEEE Trans. Auto. Control*, 19(6), 716.
+- NIST X-ray Photoelectron Spectroscopy Database
+
+---
+
+## 📝 License
+
+MIT License — see [LICENSE](./LICENSE) for details.
+
+---
+
+*Built with ❤️ for the materials science community.*
