@@ -26,7 +26,33 @@ from xps_expert import (
     components_from_template, expert_fit,
 )
 
-st.set_page_config(page_title="XPS AutoFit", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="XPS AutoFit",
+    page_icon="📊",
+    layout="wide",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': """
+        ### XPS AutoFit
+        자동화된 XPS 피크 피팅 도구 · v0.4
+        
+        **공익 목적의 학술 도구**로 개발되었습니다.
+        연구·교육·논문 작성에 자유롭게 사용 가능하며,
+        결과의 화학적·물리적 타당성은 사용자가 검증해주세요.
+        
+        **프로젝트 / 코드 / 기여자**
+        - Repository: [github.com/suhyeokchoe/xps-autofit](https://github.com/suhyeokchoe/xps-autofit)
+        - Authors: [AUTHORS.md](https://github.com/suhyeokchoe/xps-autofit/blob/main/AUTHORS.md)
+        - License: MIT
+        
+        **참고 문헌**
+        - CasaXPS Cookbook (Casa Software Ltd, 2019)
+        - Shirley, D. A. (1972). *Phys. Rev. B*, 5(12), 4709
+        - Akaike, H. (1974). *IEEE Trans. Auto. Control*, 19(6), 716
+        """
+    }
+)
 
 st.markdown("""
 <style>
@@ -475,3 +501,50 @@ with tab_expert:
                     f"데이터가 이 컴포넌트를 실제로 지지하지 않을 수 있습니다. "
                     f"제거하고 재피팅을 고려해보세요."
                 )
+# =========================================================================
+# 푸터: 면책조항 + 데이터 정책 + 인용 안내
+# =========================================================================
+st.divider()
+
+footer_col1, footer_col2 = st.columns(2)
+
+with footer_col1:
+    with st.expander("⚖️ 이용 시 주의사항", expanded=False):
+        st.markdown("""
+자유 이용 정책 : 
+이 도구는 공익 목적의 학술 도구입니다.
+연구, 교육, 논문 작성, 학회 발표 등에 자유롭게 사용 가능합니다.
+
+결과 검증 의무 : 
+자동 피팅 결과는 통계적 최적해이며, 화학적·물리적 타당성은
+사용자가 도메인 지식으로 직접 검증해야 합니다. 본 도구의 결과를
+근거로 한 의사결정·출판물·산업적 응용에 대한 책임은 사용자에게 있습니다.
+
+알려진 한계
+- F1s, C1s, O1s 등 일반적 region에 최적화되어 있습니다.
+- 비대칭 라인쉐입(LA, DS) 미지원합니다. 이용자가 많아지면 그때 고려해보겠습니다....
+- 화학상태 자동 라벨링은 도메인 prior 기반 (절대 정답 아님!)
+""")
+
+with footer_col2:
+    with st.expander("🔒 데이터 처리 정책", expanded=False):
+        st.markdown("""
+데이터 보호
+- 업로드된 XPS 데이터는 서버 메모리에서만 처리됩니다.
+- 세션 종료 시 데이터는 자동 삭제되며, 별도 저장소에 보관하지 않습니다.
+- 어떤 형태의 사용자 식별정보도 수집하지 않습니다.
+
+익명 통계
+- Streamlit Cloud에서 익명 접속 통계가 자동 수집될 수 있으나,
+  본 도구가 별도로 사용자 데이터를 추적하지 않습니다.
+
+버그 / 기능 제안
+- GitHub Issues 또는 'Manage app'을 통해 전달해주세요. 감사합니다.
+""")
+
+st.markdown(
+    "<div style='text-align:center; color:#888; padding:1rem 0; font-size:0.85em;'>"
+    "XPS AutoFit · v0.4 · 결과는 항상 도메인 지식으로 검증하세요."
+    "</div>",
+    unsafe_allow_html=True
+)
