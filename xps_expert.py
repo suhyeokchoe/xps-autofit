@@ -25,75 +25,142 @@ from typing import List, Optional
 # -------------------------------------------------------------------
 
 MATERIAL_TEMPLATES = {
-    # ------------------ O1s region (525-540 eV) ------------------
+    # ============================================================
+    # O1s region (525-540 eV)
+    # ============================================================
     'MOF (Zr-based)': {
         'region': 'O1s',
         'description': 'Zr-based MOFs: UiO-66/67, MOF-801/867',
-        'reference': 'Nat. Commun. 16, 162 (2025), Wang et al. JMCA 2017',
+        'reference': 'Nat. Commun. 16, 162 (2025); Wang et al. JMCA 2017',
         'components': [
-            {'name': 'Zr-O-Zr', 'be': 529.4, 'be_tol': 0.3, 'fwhm': (0.9, 2.0)},
-            {'name': 'Zr-O-C',  'be': 530.7, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
-            {'name': 'Zr-O-H',  'be': 532.1, 'be_tol': 0.2, 'fwhm': (1.0, 2.2)},
+            {'name': 'Zr-O-Zr (oxo cluster)', 'be': 529.4, 'be_tol': 0.3, 'fwhm': (0.9, 2.0)},
+            {'name': 'Zr-O-C (carboxylate linker)', 'be': 530.7, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+            {'name': 'Zr-O-H (hydroxyl / adsorbed water)', 'be': 532.1, 'be_tol': 0.2, 'fwhm': (1.0, 2.2)},
         ],
         'optional_components': [
-            {'name': 'S=O (TFSI)', 'be': 531.6, 'be_tol': 0.2, 'fwhm': (1.0, 1.8),
-             'hint': 'TFSI 이온성 액체가 포함된 경우'},
+            {'name': 'S=O (sulfonate group)', 'be': 531.6, 'be_tol': 0.3, 'fwhm': (1.0, 1.8),
+             'hint': '예: sulfate, sulfonate, TFSI/TFS 이온성 액체, 황 함유 분자'},
+            {'name': 'C=O (carbonyl)', 'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.0, 2.0),
+             'hint': '예: carbonyl, ketone, aldehyde'},
+            {'name': 'O-C=O (carboxylate organic)', 'be': 533.5, 'be_tol': 0.3, 'fwhm': (1.0, 2.0),
+             'hint': '예: 자유 carboxylic acid (linker가 아닌)'},
         ],
     },
     'Metal oxide (generic)': {
         'region': 'O1s',
-        'description': 'Generic transition metal oxide (TiO2, Fe2O3, SnO2 etc)',
+        'description': 'Generic transition metal oxide (TiO2, Fe2O3, SnO2, ZnO 등)',
         'reference': 'NIST XPS DB',
         'components': [
-            {'name': 'M-O (lattice)',  'be': 530.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
-            {'name': 'O-H / defect',   'be': 531.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.2)},
-            {'name': 'C=O / adsorbed', 'be': 532.5, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
+            {'name': 'M-O (lattice oxygen)',  'be': 530.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
+            {'name': 'O-H (hydroxyl / defect)', 'be': 531.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.2)},
+            {'name': 'C=O / adsorbed water', 'be': 532.5, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
+        ],
+        'optional_components': [
+            {'name': 'S=O (sulfonate group)', 'be': 531.6, 'be_tol': 0.3, 'fwhm': (1.0, 1.8),
+             'hint': '예: sulfate, sulfonate, TFSI/TFS 이온성 액체'},
+            {'name': 'O-C=O (carboxylate organic)', 'be': 533.5, 'be_tol': 0.3, 'fwhm': (1.0, 2.0),
+             'hint': '예: 표면 흡착 organic acid'},
         ],
     },
-    'Polymer (C-O, C=O)': {
+    'Polymer with O (O1s)': {
         'region': 'O1s',
-        'description': 'Organic polymer with oxygen functionalities',
+        'description': 'Organic polymer with oxygen functionalities (PMMA, PEG, PVA 등)',
         'reference': 'Beamson & Briggs High-Res XPS of Organic Polymers',
         'components': [
-            {'name': 'C=O',  'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
-            {'name': 'C-O',  'be': 532.8, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
-            {'name': 'O-C=O','be': 533.5, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+            {'name': 'C=O (carbonyl)',  'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+            {'name': 'C-O (ether / alcohol)', 'be': 532.8, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+            {'name': 'O-C=O (carboxylate / ester)', 'be': 533.5, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+        ],
+        'optional_components': [
+            {'name': 'S=O (sulfonate group)', 'be': 531.6, 'be_tol': 0.3, 'fwhm': (1.0, 1.8),
+             'hint': '예: 황화 polymer (Nafion 등), sulfonated 그룹'},
+            {'name': 'M-O (metal oxide impurity)', 'be': 530.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0),
+             'hint': '예: 표면 metal oxide 잔류물'},
         ],
     },
 
-    # ------------------ C1s region (280-295 eV) ------------------
+    # ============================================================
+    # C1s region (280-295 eV)
+    # ============================================================
     'Polymer (C1s)': {
         'region': 'C1s',
-        'description': 'Typical organic polymer C1s',
+        'description': 'Typical organic polymer C1s (PE, PMMA, PS 등)',
         'reference': 'Beamson & Briggs',
         'components': [
-            {'name': 'C-C / C-H', 'be': 284.8, 'be_tol': 0.1, 'fwhm': (0.9, 1.5)},
-            {'name': 'C-O',       'be': 286.3, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
-            {'name': 'C=O',       'be': 287.8, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
-            {'name': 'O-C=O',     'be': 288.9, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'C-C / C-H (aliphatic)', 'be': 284.8, 'be_tol': 0.1, 'fwhm': (0.9, 1.5)},
+            {'name': 'C-O (ether / alcohol)', 'be': 286.3, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'C=O (carbonyl)',        'be': 287.8, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'O-C=O (carboxylate / ester)', 'be': 288.9, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+        ],
+        'optional_components': [
+            {'name': 'C-F (covalent fluoride)', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.0, 1.6),
+             'hint': '예: 부분 fluorinated polymer (PVDF 등)'},
+            {'name': 'CF2 (perfluoro)', 'be': 291.5, 'be_tol': 0.3, 'fwhm': (1.0, 1.6),
+             'hint': '예: PTFE, Nafion 같은 perfluoro polymer'},
+            {'name': 'CF3 (terminal trifluoro)', 'be': 293.5, 'be_tol': 0.3, 'fwhm': (1.0, 1.6),
+             'hint': '예: TFSI 이온성 액체, trifluoromethyl 그룹'},
+            {'name': 'C-N', 'be': 286.0, 'be_tol': 0.3, 'fwhm': (1.0, 1.6),
+             'hint': '예: amine, amide 함유 polymer'},
+            {'name': 'π-π* shake-up', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0),
+             'hint': '예: aromatic polymer (PS, PEEK 등)'},
         ],
     },
-    'Graphitic carbon': {
+    'Graphitic carbon (C1s)': {
         'region': 'C1s',
-        'description': 'Graphite / graphene / CNT',
+        'description': 'Graphite, graphene, CNT, carbon nanofiber',
         'reference': 'Carbon 65, 249 (2013)',
         'components': [
-            {'name': 'sp2 C=C',    'be': 284.4, 'be_tol': 0.1, 'fwhm': (0.7, 1.2)},
-            {'name': 'sp3 C-C',    'be': 285.2, 'be_tol': 0.2, 'fwhm': (0.9, 1.5)},
-            {'name': 'C-O',        'be': 286.3, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
-            {'name': 'C=O',        'be': 287.8, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
-            {'name': 'π-π* shake', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+            {'name': 'sp2 C=C (graphitic)',  'be': 284.4, 'be_tol': 0.1, 'fwhm': (0.7, 1.2)},
+            {'name': 'sp3 C-C (defect)',     'be': 285.2, 'be_tol': 0.2, 'fwhm': (0.9, 1.5)},
+            {'name': 'C-O (oxidized surface)', 'be': 286.3, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'C=O (carbonyl on edge)', 'be': 287.8, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+            {'name': 'π-π* shake-up',          'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+        ],
+        'optional_components': [
+            {'name': 'O-C=O (carboxylate edge)', 'be': 288.9, 'be_tol': 0.3, 'fwhm': (1.0, 1.6),
+             'hint': '예: 산화된 graphene edge group'},
+            {'name': 'C-F', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.0, 1.6),
+             'hint': '예: fluorinated graphene'},
         ],
     },
 
-    # ------------------ F1s region (680-695 eV) ------------------
+    # ============================================================
+    # F1s region (680-695 eV)
+    # ============================================================
     'Fluorinated (F1s)': {
         'region': 'F1s',
-        'description': 'Ionic/covalent F compounds',
+        'description': '불소 함유 화합물 일반 (metal fluoride, fluorinated polymer 등)',
         'reference': 'NIST XPS DB',
         'components': [
-            {'name': 'Metal-F (ionic)', 'be': 685.5, 'be_tol': 0.5, 'fwhm': (1.2, 2.5)},
-            {'name': 'C-F (covalent)',  'be': 688.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+            {'name': 'M-F (ionic / metal fluoride)', 'be': 685.5, 'be_tol': 0.5, 'fwhm': (1.2, 2.5)},
+            {'name': 'C-F (covalent / organic)',     'be': 688.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+        ],
+        'optional_components': [
+            {'name': 'F (semi-ionic, e.g. graphite-F)', 'be': 687.0, 'be_tol': 0.5, 'fwhm': (1.5, 2.5),
+             'hint': '예: fluorinated graphene, GIC 등 중간 결합'},
+        ],
+    },
+
+    # ============================================================
+    # N1s region (395-410 eV)
+    # ============================================================
+    'Nitrogen-containing (N1s)': {
+        'region': 'N1s',
+        'description': 'Polymer/MOF/biomolecule 등 질소 함유 일반',
+        'reference': 'Beamson & Briggs; NIST',
+        'components': [
+            {'name': 'C-N (amine / amide)',  'be': 399.5, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
+            {'name': 'C=N (imine / pyridinic)', 'be': 398.5, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
+        ],
+        'optional_components': [
+            {'name': 'N-O (nitro / nitrite)', 'be': 405.0, 'be_tol': 0.8, 'fwhm': (1.2, 2.5),
+             'hint': '예: nitro group (-NO2), nitrite'},
+            {'name': 'N+ (protonated / ammonium)', 'be': 401.5, 'be_tol': 0.5, 'fwhm': (1.0, 2.0),
+             'hint': '예: 양이온성 N (-NH3+, imidazolium 등)'},
+            {'name': 'Pyrrolic N', 'be': 400.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.0),
+             'hint': '예: 질소 도핑 carbon (N-doped graphene)'},
+            {'name': 'Graphitic N', 'be': 401.0, 'be_tol': 0.4, 'fwhm': (1.2, 2.0),
+             'hint': '예: 질소 도핑 carbon (graphitic substitution)'},
         ],
     },
 }

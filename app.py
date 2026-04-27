@@ -28,6 +28,9 @@ from xps_expert import (
 from xps_survey import (
     analyze_survey, is_survey_scan, ELEMENT_DB,
 )
+from xps_multimatch import (
+    auto_match_templates, TemplateMatchResult, get_compatible_templates,
+)
 
 st.set_page_config(
     page_title="XPS AutoFit",
@@ -504,7 +507,7 @@ with tab_auto:
             plot_survey_result(result, meta, st)
 
     else:
-        # ---- Narrow 자동 모드 (v0.4와 동일) ----
+        # ---- Narrow 자동 모드 (v0.7 단순 방식) ----
         st.markdown("AIC 기반 자동 피크 개수 선택 + singlet/doublet 자동 분기")
 
         col_a, col_b, col_c = st.columns(3)
@@ -601,6 +604,8 @@ with tab_auto:
             plot_narrow_result(result, meta, st, mode_label='auto')
 
 
+
+
 # -------------------------------------------------------------------
 # Expert 모드 (v0.4와 동일, narrow 전용)
 # -------------------------------------------------------------------
@@ -613,14 +618,129 @@ with tab_expert:
     st.markdown("#### 🔬 Expert 모드 — 재료 기반 제약 피팅 (Narrow scan용)")
     st.caption("논문 수준의 피팅. 재료 템플릿 선택 → 컴포넌트 편집 → 피팅.")
 
+    # ===========================================================
+    # 🤖 자동 제안 섹션 (선택, 접혀있는 상태로 시작)
+    # ===========================================================
+    with st.expander("🤖 자동 제안 받기 — 어떤 템플릿이 좋을지 모르겠다면",
+                       expanded=False):
+        st.caption(
+            "현재 데이터를 모든 호환 템플릿에 자동 매칭하고 R² 순으로 보여줍니다. "
+            "원하는 카드를 선택하면 아래 **재료 템플릿**이 그것으로 자동 전환됩니다."
+        )
+
+        # region 결정 (자동 감지 또는 사용자가 위에서 정한 것)
+        sugg_region = None
+        if region_detected and region_detected != 'unknown':
+            sugg_region = region_detected
+        else:
+            # BE 범위로 추정
+            be_center = (be.max() + be.min()) / 2
+            for r_name, (lo, hi) in [
+                ('F1s', (680, 695)), ('O1s', (525, 540)),
+                ('C1s', (280, 295)), ('N1s', (395, 410)),
+            ]:
+                if lo - 5 <= be_center <= hi + 5:
+                    sugg_region = r_name
+                    break
+
+        if not sugg_region:
+            st.warning(
+                "Region을 추정할 수 없습니다. 아래 **재료 템플릿**에서 직접 선택해주세요."
+            )
+        else:
+            run_match = st.button(
+                f"🔍 {sugg_region} 템플릿들 자동 매칭하기",
+                use_container_width=True,
+                key='run_auto_match'
+            )
+
+            # 한 번 누르면 결과를 session_state에 저장 (탭 전환 시 유지)
+            if run_match:
+                with st.spinner(f"{sugg_region} region의 모든 템플릿 매칭 중..."):
+                    match_results = auto_match_templates(
+                        be, counts, region_hint=sugg_region,
+                        bg_kwargs=bg_kwargs, max_results=6
+                    )
+                st.session_state['exp_match_results'] = match_results
+                st.session_state['exp_match_region'] = sugg_region
+
+            # 저장된 결과가 있으면 표시
+            saved_results = st.session_state.get('exp_match_results')
+            if saved_results and st.session_state.get('exp_match_region') == sugg_region:
+                st.success(f"✓ {len(saved_results)}개 모델 매칭 완료. "
+                            "원하는 결과의 **'이 템플릿 적용'** 버튼을 누르세요.")
+
+                # 카드 표시 (3개씩 한 줄)
+                label_color = {
+                    'best': '🟢', 'good': '🟢',
+                    'acceptable': '🟡', 'poor': '🔴'
+                }
+                for row_start in range(0, len(saved_results), 3):
+                    cols = st.columns(3)
+                    for j, col in enumerate(cols):
+                        idx = row_start + j
+                        if idx >= len(saved_results):
+                            continue
+                        r = saved_results[idx]
+                        with col:
+                            marker = label_color.get(r.label, '⚪')
+                            star = '⭐ ' if r.rank == 1 else ''
+                            with st.container(border=True):
+                                # 카드 제목 (free position 표시는 짧게)
+                                disp_name = r.template_name.replace(
+                                    ' [free position]', ' (자유위치)'
+                                )
+                                st.markdown(f"**{star}{marker} {disp_name}**")
+                                cm1, cm2 = st.columns(2)
+                                cm1.metric("R²", f"{r.r_squared:.4f}")
+                                cm2.metric("자유도", r.n_free_params)
+                                st.caption(f"{r.n_components} components · "
+                                             f"{r.label}")
+                                # "적용" 버튼 → 그 템플릿 이름을 session_state에
+                                if st.button(
+                                    "이 템플릿 적용",
+                                    key=f"apply_template_{idx}",
+                                    use_container_width=True,
+                                ):
+                                    # Statistical auto는 Expert 템플릿이 아니라 적용 불가
+                                    if r.template_name.startswith('Statistical'):
+                                        st.warning(
+                                            "⚠️ Statistical auto는 통계 자동 모드입니다. "
+                                            "Expert에 적용할 수 없습니다. "
+                                            "자동 모드 탭에서 사용하세요."
+                                        )
+                                    else:
+                                        # 'XXX [free position]' → 'XXX'로 정규화
+                                        clean_name = r.template_name.replace(
+                                            ' [free position]', ''
+                                        )
+                                        st.session_state['exp_template'] = clean_name
+                                        st.session_state['exp_template_applied'] = clean_name
+                                        st.rerun()
+
+    # 적용된 템플릿 표시
+    applied_msg = st.session_state.get('exp_template_applied')
+    if applied_msg:
+        st.info(f"✓ **자동 제안에서 적용됨**: `{applied_msg}` "
+                  "— 아래에서 컴포넌트를 미세조정 후 피팅하세요.")
+
+    # ===========================================================
+    # 재료 템플릿 선택 + 편집 (기존 + session_state 연결)
+    # ===========================================================
     col_t1, col_t2 = st.columns([2, 3])
     with col_t1:
         filtered = {k: v for k, v in MATERIAL_TEMPLATES.items()
                      if v['region'] == region_detected}
         if not filtered:
             filtered = MATERIAL_TEMPLATES
+        # session_state에 자동 제안으로 적용된 게 있으면 default로 사용
+        default_idx = 0
+        applied = st.session_state.get('exp_template')
+        if applied and applied in filtered:
+            default_idx = list(filtered.keys()).index(applied)
         template_name = st.selectbox(
-            "재료 템플릿", options=list(filtered.keys()), key='exp_template'
+            "재료 템플릿", options=list(filtered.keys()),
+            index=default_idx, key='exp_template_select'
         )
     with col_t2:
         tmpl = MATERIAL_TEMPLATES[template_name]
