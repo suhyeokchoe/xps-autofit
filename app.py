@@ -16,7 +16,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 from xps_engine import (
-    load_xps_csv, auto_fit_v3, fit_n_peaks, fit_n_doublets,
+    load_xps_csv, load_xps_data, auto_fit_v3, fit_n_peaks, fit_n_doublets,
     shirley_background, detect_peaks_v2, pseudo_voigt,
     calibrate_shift,
     ELEMENT_PRIORS, DOUBLET_PRIORS, is_doublet,
@@ -50,10 +50,10 @@ st.set_page_config(
         **프로젝트 / 코드 / 기여자**
         - Repository: [github.com/suhyeokchoe/xps-autofit](https://github.com/suhyeokchoe/xps-autofit)
         - Authors: [AUTHORS.md](https://github.com/suhyeokchoe/xps-autofit/blob/main/AUTHORS.md)
-        - Contact : heyok7714@naver.com or heyok7714@knu.ac.kr
         - License: MIT
 
         **참고 문헌**
+        - CasaXPS Cookbook (Casa Software Ltd, 2019)
         - Shirley, D. A. (1972). *Phys. Rev. B*, 5(12), 4709
         - Akaike, H. (1974). *IEEE Trans. Auto. Control*, 19(6), 716
         - NIST X-ray Photoelectron Spectroscopy Database
@@ -150,7 +150,7 @@ def plot_narrow_result(result, meta, container, mode_label=None):
     dl1.download_button("📋 파라미터 CSV", data=csv_buf.getvalue(),
                          file_name=f"{meta['source_file']}_params.csv",
                          mime='text/csv', use_container_width=True,
-                         key=f"dl_params_{mode_label}")
+                         key=f"dl_params_{mode_label}_{meta.get('source_file','')}")
 
     be_desc = be_p[::-1]
     curves_dict = {
@@ -166,20 +166,20 @@ def plot_narrow_result(result, meta, container, mode_label=None):
     dl2.download_button("📊 피팅 곡선 CSV", data=curves_buf.getvalue(),
                          file_name=f"{meta['source_file']}_curves.csv",
                          mime='text/csv', use_container_width=True,
-                         key=f"dl_curves_{mode_label}")
+                         key=f"dl_curves_{mode_label}_{meta.get('source_file','')}")
 
     png_buf = io.BytesIO()
     fig.savefig(png_buf, format='png', dpi=180, bbox_inches='tight')
     dl3.download_button("🖼️ 플롯 PNG", data=png_buf.getvalue(),
                          file_name=f"{meta['source_file']}_fit.png",
                          mime='image/png', use_container_width=True,
-                         key=f"dl_png_{mode_label}")
+                         key=f"dl_png_{mode_label}_{meta.get('source_file','')}")
 
 
 # =========================================================================
 # 공통 헬퍼: Survey 결과 플롯
 # =========================================================================
-def plot_survey_result(result, meta, container):
+def plot_survey_result(result, meta, container, key_prefix='survey'):
     """Survey 분석 결과를 시각화 + 테이블 + 정량 + 다운로드"""
     be_p = result['be']; counts_p = result['counts']
 
@@ -324,7 +324,7 @@ def plot_survey_result(result, meta, container):
     dl1.download_button("🧪 식별 원소 CSV", data=csv_buf.getvalue(),
                          file_name=f"{meta['source_file']}_elements.csv",
                          mime='text/csv', use_container_width=True,
-                         key='dl_survey_elem')
+                         key=f'dl_survey_elem_{key_prefix}_{meta.get("source_file","")}')
 
     if quant:
         df_q_export = pd.DataFrame([{
@@ -340,14 +340,14 @@ def plot_survey_result(result, meta, container):
         dl2.download_button("📊 정량 CSV", data=csv_q_buf.getvalue(),
                              file_name=f"{meta['source_file']}_quantification.csv",
                              mime='text/csv', use_container_width=True,
-                             key='dl_survey_quant')
+                             key=f'dl_survey_quant_{key_prefix}_{meta.get("source_file","")}')
 
     png_buf = io.BytesIO()
     fig.savefig(png_buf, format='png', dpi=180, bbox_inches='tight')
     dl3.download_button("🖼️ 플롯 PNG", data=png_buf.getvalue(),
                          file_name=f"{meta['source_file']}_survey.png",
                          mime='image/png', use_container_width=True,
-                         key='dl_survey_png')
+                         key=f'dl_survey_png_{key_prefix}_{meta.get("source_file","")}')
 
 
 # =========================================================================
@@ -363,10 +363,17 @@ st.caption("자동 XPS 피팅 · v0.5 · Survey scan 자동 분석 추가")
 with st.sidebar:
     st.header("📤 데이터 업로드")
     uploaded = st.file_uploader(
-        "CSV 또는 TXT 파일", type=['csv', 'txt'],
-        help="CasaXPS export 또는 2열(BE, Counts) CSV"
+        "CSV / TXT / Excel 파일",
+        type=['csv', 'txt', 'xlsx', 'xls'],
+        help=(
+            "**지원 형식**:\n"
+            "- CSV / TXT: CasaXPS export 또는 2열(BE, Counts)\n"
+            "- Excel: .xlsx 및 .xls 모두 지원\n\n"
+            "**Excel 자동 감지**: 'Binding Energy' / 'Counts' 헤더가 있으면 자동 인식. "
+            "헤더가 없으면 첫 번째 시트의 처음 두 숫자 컬럼을 사용합니다."
+        )
     )
-    st.caption("💡 .xls는 Excel에서 CSV로 저장 후 업로드")
+    st.caption("💡 Excel 다중 시트는 첫 번째 시트만 사용됩니다")
 
     st.divider()
     st.header("🎯 Calibration")
@@ -375,7 +382,7 @@ with st.sidebar:
         value=False,
         help=(
             "**BE offset 적용**: Binding Energy 축에 일정한 보정값을 더합니다.\n\n"
-            "**언제 사용하나요?**: 샘플의 charging 효과로 모든 피크가 일정하게 시프트된 경우.\n\n"
+            "**언제 사용**: 샘플의 충전(charging) 효과로 모든 피크가 일정하게 시프트된 경우.\n\n"
             "**일반 관행**: C 1s adventitious carbon 피크를 **284.8 eV**로 맞추기 위해 "
             "측정값과의 차이만큼 shift를 입력합니다.\n\n"
             "**예시**: C 1s가 286.3 eV에서 측정됐다면 → Shift = -1.5 eV로 설정."
@@ -437,7 +444,7 @@ if uploaded is None:
 **Survey 분석 기능**:
 1. 피크 자동 검출 (1차 미분 + prominence)
 2. **다중 라인 자기일관성 매칭** — 단일 피크 매칭의 가짜 양성 방지
-3. charging 시프트 자동 처리
+3. 충전(charging) 시프트 자동 처리
 4. 신뢰도 등급 (HIGH / MEDIUM / LOW)
 5. **근사 atomic %** 정량 (Scofield RSF 기반)
 
@@ -456,10 +463,125 @@ Ti, Cr, Mn, Fe, Co, Ni, Cu, Zn, Ga, As, Mo, Ag, In, Sn, Hf, Ta, W, Pt, Au
 # =========================================================================
 # 데이터 로딩
 # =========================================================================
+import io as _io
+
 try:
-    raw_bytes = uploaded.read()
-    text = raw_bytes.decode('utf-8-sig', errors='replace')
-    be, counts, meta = load_xps_csv(text, source_name=uploaded.name)
+    fname = uploaded.name.lower()
+    if fname.endswith(('.xlsx', '.xls')):
+        # Excel: 시트 목록 먼저 조회
+        raw_bytes = uploaded.read()
+        from xps_engine import list_excel_sheets
+
+        # 시트 목록 조회 (BytesIO 재사용 못 하므로 두 번 만듦)
+        sheets_info = list_excel_sheets(_io.BytesIO(raw_bytes))
+
+        # 데이터 있는 시트만 필터
+        valid_sheets = [s for s in sheets_info if s['has_data']]
+
+        if not valid_sheets:
+            st.error(
+                "Excel 파일에서 분석 가능한 데이터 시트를 찾지 못했습니다. "
+                "각 시트에 BE/Counts 같은 숫자 데이터가 있는지 확인해주세요."
+            )
+            with st.expander("📋 발견된 시트 정보"):
+                for s in sheets_info:
+                    st.text(f"  • {s['name']}: {s['n_rows']} rows, "
+                            f"data={s['has_data']}, preview='{s['preview']}'")
+            st.stop()
+
+        # 시트 선택 UI
+        if len(valid_sheets) == 1:
+            # 시트 1개 — 자동 선택
+            selected_sheet = valid_sheets[0]['name']
+            st.info(f"📄 Excel 시트 '{selected_sheet}'을(를) 자동 선택했습니다.")
+        else:
+            # 다중 시트 — dropdown
+            st.markdown("#### 📑 Excel 시트 선택")
+            st.caption(
+                f"이 Excel 파일에 데이터 시트가 **{len(valid_sheets)}개** 있습니다. "
+                f"분석할 시트를 선택하세요."
+            )
+
+            # session_state로 시트 선택 보존
+            sheet_options = [s['name'] for s in valid_sheets]
+            sheet_key = f"sheet_select_{uploaded.name}"
+            selected_sheet = st.selectbox(
+                "분석할 시트",
+                options=sheet_options,
+                key=sheet_key,
+                format_func=lambda n: next(
+                    (f"{n}  ({s['n_rows']} rows)" for s in valid_sheets if s['name'] == n),
+                    n
+                )
+            )
+
+            # 미리보기
+            sel_info = next(s for s in valid_sheets if s['name'] == selected_sheet)
+            st.caption(f"📋 미리보기: `{sel_info['preview']}`")
+
+        # 선택된 시트로 첫 로드 (자동 휴리스틱)
+        try:
+            be, counts, meta = load_xps_data(
+                _io.BytesIO(raw_bytes),
+                source_name=f"{uploaded.name} :: {selected_sheet}",
+                sheet_name=selected_sheet,
+            )
+        except Exception as e:
+            st.error(f"시트 '{selected_sheet}' 로딩 실패: {e}")
+            st.stop()
+
+        # 컬럼 override UI (Excel만, 컬럼 후보가 2개 이상일 때만)
+        avail_cols = meta.get('available_columns', [])
+        if len(avail_cols) >= 2:
+            with st.expander(
+                f"🔧 다른 컬럼 사용하기 — "
+                f"현재 자동 선택: '{next((c['name'] for c in avail_cols if c['is_default']), '?')}'",
+                expanded=False
+            ):
+                st.caption(
+                    "Excel 파일에 여러 데이터 컬럼이 있습니다 (예: raw counts, "
+                    "envelope, 컴포넌트, residual 등). 자동으로는 **Binding Energy "
+                    "다음의 첫 번째 컬럼**을 raw counts로 가정합니다. 다르면 수동 지정하세요."
+                )
+
+                col_options = [c['index'] for c in avail_cols]
+                col_labels = {c['index']: f"col {c['index']}: {c['name']}"
+                                for c in avail_cols}
+                # 현재 default
+                current_idx = next(
+                    (c['index'] for c in avail_cols if c['is_default']),
+                    col_options[0]
+                )
+
+                override_key = f"col_override_{uploaded.name}_{selected_sheet}"
+                user_choice = st.selectbox(
+                    "Counts로 사용할 컬럼",
+                    options=col_options,
+                    index=col_options.index(current_idx) if current_idx in col_options else 0,
+                    format_func=lambda i: col_labels.get(i, f"col {i}"),
+                    key=override_key,
+                )
+
+                # 사용자가 다른 컬럼 선택했으면 재로드
+                if user_choice != current_idx:
+                    try:
+                        be, counts, meta = load_xps_data(
+                            _io.BytesIO(raw_bytes),
+                            source_name=f"{uploaded.name} :: {selected_sheet}",
+                            sheet_name=selected_sheet,
+                            counts_col_idx=user_choice,
+                        )
+                        st.success(
+                            f"✓ '{col_labels[user_choice]}' 컬럼으로 다시 로드했습니다."
+                        )
+                    except Exception as e:
+                        st.error(f"재로드 실패: {e}")
+                        st.stop()
+    else:
+        # CSV/TXT는 기존 동작 (텍스트 디코딩)
+        raw_bytes = uploaded.read()
+        text = raw_bytes.decode('utf-8-sig', errors='replace')
+        be, counts, meta = load_xps_csv(text, source_name=uploaded.name)
 except Exception as e:
     st.error(f"데이터 로딩 실패: {e}")
     st.stop()
@@ -514,7 +636,7 @@ with tab_auto:
         if not result['success']:
             st.error(f"분석 실패: {result['reason']}")
         else:
-            plot_survey_result(result, meta, st)
+            plot_survey_result(result, meta, st, key_prefix='auto')
 
     else:
         # ---- Narrow 자동 모드 (v0.7 단순 방식) ----
@@ -790,7 +912,7 @@ with tab_expert:
                         "**체크하면**: 피팅 중 BE가 절대 움직이지 않음. "
                         "위 'BE 중심' 값이 그대로 유지됩니다.\n\n"
                         "**체크 해제 시**: 'BE 이동 ± (eV)' 범위 안에서 자유롭게 이동 가능.\n\n"
-                        "**언제 고정하나요?**: 문헌에서 정확한 위치를 알고 있고, 그 위치가 절대적인 "
+                        "**언제 고정**: 문헌에서 정확한 위치를 알고 있고, 그 위치가 절대적인 "
                         "기준일 때 (예: 표준 reference 화합물의 알려진 BE)."
                     )
                 )
@@ -823,7 +945,7 @@ with tab_expert:
             value=False,
             help=(
                 "**FWHM 공유**: 같은 재료의 모든 컴포넌트가 동일한 FWHM 값을 갖도록 강제합니다.\n\n"
-                "**언제 사용하나요?**: 같은 화학 환경의 재료(예: 동일 MOF의 다양한 산소 환경)에서는 "
+                "**언제 사용**: 같은 화학 환경의 재료(예: 동일 MOF의 다양한 산소 환경)에서는 "
                 "물리적으로 FWHM이 비슷합니다. 공유로 강제하면 자유 파라미터가 줄어 "
                 "**과적합(overfitting) 방지**에 효과적입니다.\n\n"
                 "**효과**: 자유도 N개 → 1개로 줄어듦 (N=컴포넌트 수). "
@@ -838,7 +960,7 @@ with tab_expert:
                 "**η (eta) 공유**: 모든 컴포넌트가 동일한 Gauss-Lorentz 혼합비를 갖도록 강제합니다.\n\n"
                 "**η 의미**: pseudo-Voigt에서 η=0이면 순수 Gaussian, η=1이면 순수 Lorentzian, "
                 "그 사이는 혼합 비율입니다. 같은 측정 장비/조건에서는 η가 거의 일정합니다.\n\n"
-                "**언제 사용하나요?**: 같은 측정 조건의 동일 재료라면 거의 항상 켜는 것이 안전합니다. "
+                "**언제 사용**: 같은 측정 조건의 동일 재료라면 거의 항상 켜는 것이 안전합니다. "
                 "**CasaXPS의 표준 관행**과 일치하는 설정입니다.\n\n"
                 "**효과**: 자유 파라미터 추가로 줄임. 결과가 화학적으로 더 안정됩니다."
             )
@@ -849,8 +971,8 @@ with tab_expert:
             value=True,
             help=(
                 "**Shirley 배경 보정**: iterative Shirley 알고리즘으로 비탄성 산란 배경을 제거합니다.\n\n"
-                "**언제 켜나요?**: 일반적인 raw XPS 데이터 (배경 미제거 상태). 거의 항상 ON.\n\n"
-                "**언제 끄나요?**: 데이터가 이미 배경 제거된 경우 "
+                "**언제 켜기**: 일반적인 raw XPS 데이터 (배경 미제거 상태). 거의 항상 ON.\n\n"
+                "**언제 끄기**: 데이터가 이미 배경 제거된 경우 "
                 "(예: 논문에서 normalized된 데이터, peak fitting 후 export된 데이터). "
                 "끄면 background = 0으로 가정합니다.\n\n"
                 "💡 사이드바의 'Background Anchor' 옵션과 함께 작동합니다."
@@ -909,7 +1031,7 @@ with tab_survey:
     st.markdown("#### 🌐 Survey 분석 — 원소 자동 식별 + 근사 정량")
     st.caption(
         "다중 라인 자기일관성 검증으로 원소를 식별합니다. "
-        "charging 시프트는 자동으로 흡수됩니다."
+        "충전(charging) 시프트는 자동으로 흡수됩니다."
     )
 
     col_s1, col_s2 = st.columns(2)
@@ -917,7 +1039,7 @@ with tab_survey:
         tolerance = st.slider(
             "Primary line tolerance (eV)", 1.0, 8.0, 4.0, 0.5,
             help="검출 피크가 DB 위치에서 얼마나 벗어나도 매칭으로 인정할지. "
-                 "Charge가 큰 샘플은 6~8 eV로."
+                 "충전이 큰 샘플은 6~8 eV로."
         )
     with col_s2:
         min_prominence = st.slider(
@@ -949,7 +1071,7 @@ with tab_survey:
                     'quantification': quant,
                     'n_elements': len([m for m in matches if m.confidence != 'low']),
                 }
-                plot_survey_result(survey_result, meta, st)
+                plot_survey_result(survey_result, meta, st, key_prefix='manual')
 
 
 # =========================================================================

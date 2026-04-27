@@ -29,6 +29,14 @@ ELEMENT_PRIORS = {
     'C1s':   (280, 295, 0.7, 2.5),
     'O1s':   (525, 540, 0.8, 3.0),
     'N1s':   (395, 410, 0.8, 2.5),
+    'Li1s':  (50, 62, 0.7, 2.0),
+    # Al 2p: 도메인 관행상 doublet split 작아서(0.4 eV) singlet으로 처리
+    'Al2p':  (68, 80, 0.7, 2.0),
+    # Si 2p: 마찬가지로 split 0.6 eV로 매우 작음 (싱글릿/더블릿 혼용)
+    'Si2p_singlet':  (95, 108, 0.6, 2.0),
+    # P 2p, S 2p, Cl 2p: doublet이지만 split 작아서 보통 singlet 처리
+    'P2p':   (128, 138, 0.8, 2.0),
+    'S2p':   (158, 170, 0.8, 2.0),
 }
 
 # Doublet: (BE_min, BE_max, FWHM_min, FWHM_max, delta_BE, area_ratio)
@@ -128,6 +136,341 @@ def load_xps_csv(path_or_text, source_name='uploaded'):
     if meta['region'] is None or meta['region'] == 'unknown':
         meta['region'] = detect_region(be.min(), be.max()) or 'unknown'
     return be, counts, meta
+
+
+def load_xps_excel(file_obj_or_path, source_name='uploaded',
+                     sheet_name=None, counts_col_idx=None):
+    """
+    Excel(.xlsx, .xls) 파일에서 BE / Counts 데이터 로드.
+
+    자동 휴리스틱 (counts_col_idx=None일 때):
+    1) 헤더 행에서 'binding'/'energy' 키워드 → BE 컬럼
+    2) 헤더에서 'count'/'cps' 키워드 → Counts 컬럼
+    3) 키워드 매칭 안 되면: 첫 숫자 컬럼=BE, 두 번째=Counts
+       단, "두 번째"는 BE 다음에 나오는 첫 데이터 컬럼 (raw로 추정)
+    4) CasaXPS export 같은 경우 raw counts는 보통 BE 바로 다음 컬럼
+
+    사용자 override (counts_col_idx 지정):
+    - 그 컬럼을 그대로 Counts로 사용. BE는 자동 감지된 것 사용.
+
+    meta에 'available_columns' 포함 → app.py가 dropdown UI 만들 수 있음.
+
+    Args:
+        file_obj_or_path: 파일 경로 또는 파일류 객체
+        source_name: 파일명
+        sheet_name: 시트 이름 (None이면 첫 시트)
+        counts_col_idx: Counts 컬럼 인덱스 강제 지정 (None이면 자동)
+
+    Returns:
+        (be, counts, meta)
+    """
+    import pandas as pd
+
+    # Pandas로 읽기
+    try:
+        if sheet_name is None:
+            df = pd.read_excel(file_obj_or_path, sheet_name=0, header=None)
+        else:
+            df = pd.read_excel(file_obj_or_path, sheet_name=sheet_name, header=None)
+    except ImportError as e:
+        if 'xlrd' in str(e).lower():
+            raise ImportError(
+                ".xls 파일을 읽으려면 xlrd 라이브러리가 필요합니다. "
+                "requirements.txt에 'xlrd==2.0.1' 추가하거나, "
+                "Excel에서 .xlsx로 다시 저장하세요."
+            )
+        raise
+    except Exception as e:
+        raise ValueError(f"Excel 파일 읽기 실패: {e}")
+
+    if df.empty:
+        raise ValueError("Excel 시트가 비어있습니다.")
+
+    # 헤더 행 찾기 — 'binding energy' 같은 명확한 패턴 우선
+    header_row = None
+
+    # Pass 1: 'binding energy' 또는 'binding'이 단독으로 들어간 행 (가장 명확)
+    for row_idx in range(min(25, len(df))):
+        row_vals = [str(v).lower() for v in df.iloc[row_idx].dropna()]
+        for v in row_vals:
+            # 'binding energy' 같은 명확한 헤더 패턴
+            if 'binding energy' in v or v.strip() == 'binding' or 'b.e.' in v:
+                header_row = row_idx
+                break
+        if header_row is not None:
+            break
+
+    # Pass 2 (fallback): 'energy' 단독 (덜 명확, 메타정보일 수도)
+    if header_row is None:
+        for row_idx in range(min(25, len(df))):
+            row_str = ' '.join([str(v).lower() for v in df.iloc[row_idx].dropna()])
+            if 'energy' in row_str:
+                header_row = row_idx
+                break
+
+    # BE 컬럼 식별
+    be_col_idx = None
+    if header_row is not None:
+        header_vals = [str(v).lower() if v is not None else '' for v in df.iloc[header_row]]
+        for i, h in enumerate(header_vals):
+            if any(k in h for k in ['binding', 'energy', 'b.e.']):
+                be_col_idx = i
+                break
+        data_start = header_row + 1
+        # CasaXPS는 헤더 다음 단위 행(eV, Counts/s 등)이 있음 — 건너뛰기
+        if data_start < len(df):
+            try_units = df.iloc[data_start]
+            unit_str = ' '.join([str(v).lower() for v in try_units.dropna()])
+            if 'ev' in unit_str or 'count' in unit_str or 'cps' in unit_str:
+                data_start += 1
+    else:
+        # fallback: 첫 숫자 행 찾기
+        data_start = None
+        for row_idx in range(min(30, len(df))):
+            row = df.iloc[row_idx]
+            numeric_count = sum(
+                1 for v in row.dropna()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            )
+            if numeric_count >= 2:
+                data_start = row_idx
+                break
+        if data_start is None:
+            raise ValueError("데이터로 보이는 숫자 행을 찾지 못했습니다.")
+
+    # 데이터 영역에서 숫자형 컬럼 찾기
+    data_df = df.iloc[data_start:].apply(pd.to_numeric, errors='coerce')
+    numeric_cols = [
+        i for i in range(data_df.shape[1])
+        if data_df.iloc[:, i].notna().sum() > len(data_df) * 0.5
+    ]
+
+    if len(numeric_cols) < 2:
+        raise ValueError(
+            f"BE/Counts로 쓸 숫자 컬럼이 충분하지 않습니다. "
+            f"발견된 숫자 컬럼: {len(numeric_cols)}개"
+        )
+
+    # BE 컬럼 결정
+    if be_col_idx is None or be_col_idx not in numeric_cols:
+        be_col_idx = numeric_cols[0]
+
+    # Counts 컬럼 결정
+    candidates = [c for c in numeric_cols if c != be_col_idx]
+    if not candidates:
+        raise ValueError("BE 외에 다른 숫자 컬럼이 없습니다.")
+
+    if counts_col_idx is not None:
+        # 사용자 지정 우선
+        if counts_col_idx not in candidates:
+            raise ValueError(
+                f"지정한 Counts 컬럼(index={counts_col_idx})이 데이터에 없습니다. "
+                f"사용 가능한 컬럼: {candidates}"
+            )
+        chosen_counts_col = counts_col_idx
+    else:
+        # 자동: BE 바로 다음의 데이터 컬럼 (CasaXPS export 관행)
+        # numeric_cols 중 be_col_idx 다음에 오는 첫 번째
+        chosen_counts_col = candidates[0]
+        for c in candidates:
+            if c > be_col_idx:
+                chosen_counts_col = c
+                break
+
+    # 컬럼 후보 정보 (사용자 dropdown UI 위해 — 컬럼명 추출)
+    available_columns = []
+    if header_row is not None:
+        header_vals = df.iloc[header_row].tolist()
+        for c in candidates:
+            name = str(header_vals[c]) if c < len(header_vals) and pd.notna(header_vals[c]) else f'Column {c}'
+            available_columns.append({
+                'index': int(c),
+                'name': name.strip(),
+                'is_default': (c == chosen_counts_col),
+            })
+    else:
+        for c in candidates:
+            available_columns.append({
+                'index': int(c),
+                'name': f'Column {c}',
+                'is_default': (c == chosen_counts_col),
+            })
+
+    # 데이터 추출
+    raw_be = pd.to_numeric(df.iloc[data_start:, be_col_idx], errors='coerce')
+    raw_counts = pd.to_numeric(df.iloc[data_start:, chosen_counts_col], errors='coerce')
+
+    valid = raw_be.notna() & raw_counts.notna()
+    be = raw_be[valid].values.astype(float)
+    counts = raw_counts[valid].values.astype(float)
+
+    if len(be) == 0:
+        raise ValueError("Excel에서 유효한 BE/Counts 데이터를 추출하지 못했습니다.")
+
+    # BE 정렬 (오름차순)
+    if be[0] > be[-1]:
+        be = be[::-1]; counts = counts[::-1]
+
+    # 선택된 컬럼 이름 (메타용)
+    chosen_name = next(
+        (a['name'] for a in available_columns if a['index'] == chosen_counts_col),
+        f'Column {chosen_counts_col}'
+    )
+
+    meta = {
+        'source_file': source_name,
+        'region': None,
+        'excel_sheet': sheet_name or 'first sheet',
+        'detected_columns': f"BE=col{be_col_idx}, Counts='{chosen_name}' (col{chosen_counts_col})",
+        'be_col_idx': int(be_col_idx),
+        'counts_col_idx': int(chosen_counts_col),
+        'available_columns': available_columns,  # app.py가 dropdown 만들 때 사용
+    }
+
+    if meta['region'] is None or meta['region'] == 'unknown':
+        meta['region'] = detect_region(be.min(), be.max()) or 'unknown'
+
+    return be, counts, meta
+
+
+def list_excel_sheets(file_obj_or_path):
+    """
+    Excel 파일의 시트 목록을 반환.
+    각 시트에 데이터가 있는지 여부도 함께 표시.
+
+    Args:
+        file_obj_or_path: 파일 경로 또는 파일류 객체
+
+    Returns:
+        list of dict: [{'name': str, 'has_data': bool, 'n_rows': int, 'preview': str}, ...]
+    """
+    import pandas as pd
+
+    try:
+        # ExcelFile은 시트 목록을 빠르게 가져옴
+        xl = pd.ExcelFile(file_obj_or_path)
+        sheet_names = xl.sheet_names
+    except ImportError as e:
+        if 'xlrd' in str(e).lower():
+            raise ImportError(
+                ".xls 파일을 읽으려면 xlrd 라이브러리가 필요합니다. "
+                "Excel에서 .xlsx로 다시 저장하거나, 관리자에게 문의하세요."
+            )
+        raise
+    except Exception as e:
+        raise ValueError(f"Excel 파일 시트 목록 조회 실패: {e}")
+
+    sheets_info = []
+    for name in sheet_names:
+        try:
+            df = pd.read_excel(file_obj_or_path, sheet_name=name, header=None,
+                                nrows=30)  # 처음 30행만 미리보기
+            has_data = False
+            n_numeric_rows = 0
+            for _, row in df.iterrows():
+                vals = row.dropna()
+                if len(vals) >= 2:
+                    has_data = True
+                    # 숫자 행 카운트
+                    try:
+                        nums = sum(1 for v in vals if isinstance(v, (int, float)))
+                        if nums >= 2:
+                            n_numeric_rows += 1
+                    except Exception:
+                        pass
+
+            # 미리보기 텍스트
+            preview = ''
+            for _, row in df.iterrows():
+                vals = [str(v) for v in row.dropna()][:3]
+                if vals:
+                    preview = ' | '.join(vals)
+                    break
+
+            sheets_info.append({
+                'name': name,
+                'has_data': has_data and n_numeric_rows >= 5,
+                'n_rows': len(df),
+                'preview': preview[:80],
+            })
+        except Exception:
+            sheets_info.append({
+                'name': name,
+                'has_data': False,
+                'n_rows': 0,
+                'preview': '(읽기 실패)',
+            })
+
+    return sheets_info
+
+
+def load_xps_data(file_obj_or_path, source_name='uploaded',
+                    sheet_name=None, counts_col_idx=None):
+    """
+    통합 entry point: 파일 확장자 + 객체 타입에 따라 적절한 로더 자동 선택.
+
+    분기 로직:
+    1) sheet_name이 명시되었으면 → 무조건 Excel
+    2) 확장자가 .xlsx/.xls 이면 → Excel
+    3) source_name이나 경로에 .xlsx/.xls가 포함되어 있으면 → Excel
+    4) 그 외 → CSV/TXT
+
+    Args:
+        file_obj_or_path: 경로(str) 또는 파일류 객체 (BytesIO/UploadedFile) 또는 텍스트
+        source_name: 파일명 (확장자 추출용)
+        sheet_name: Excel 시트 이름 (지정 시 Excel로 강제 분기)
+        counts_col_idx: Excel Counts 컬럼 인덱스 강제 지정
+
+    Returns:
+        (be, counts, meta)
+    """
+    # 1) sheet_name이 있으면 Excel 확정
+    if sheet_name is not None:
+        return load_xps_excel(file_obj_or_path,
+                                source_name=source_name,
+                                sheet_name=sheet_name,
+                                counts_col_idx=counts_col_idx)
+
+    # 2) 확장자 검사 (source_name 또는 경로)
+    fname = source_name or ''
+    if isinstance(file_obj_or_path, (str, Path)):
+        try:
+            p = Path(str(file_obj_or_path))
+            if p.exists() or p.suffix:
+                fname = p.name
+        except (OSError, ValueError):
+            pass
+
+    fname_lower = fname.lower()
+    # ".xlsx"가 어디든 포함되어 있으면 Excel (예: "file.xlsx :: Sheet1")
+    is_excel = '.xlsx' in fname_lower or '.xls ' in fname_lower or fname_lower.endswith('.xls')
+
+    if is_excel:
+        return load_xps_excel(file_obj_or_path,
+                                source_name=source_name,
+                                sheet_name=sheet_name,
+                                counts_col_idx=counts_col_idx)
+
+    # 3) bytes/BytesIO인데 Excel 마커가 없으면 위험 — 명시적 에러
+    if hasattr(file_obj_or_path, 'read') and not isinstance(file_obj_or_path, (str, Path)):
+        # 파일 객체인데 확장자를 모르면 CSV/TXT로 가정 (텍스트 디코딩 시도)
+        # 단, BytesIO면 텍스트로 변환 필요
+        try:
+            data = file_obj_or_path.read()
+            if isinstance(data, bytes):
+                text = data.decode('utf-8-sig', errors='replace')
+                return load_xps_csv(text, source_name=source_name)
+            else:
+                return load_xps_csv(data, source_name=source_name)
+        except Exception as e:
+            raise ValueError(
+                f"파일 형식을 인식할 수 없습니다 (source_name={source_name}). "
+                f"파일명에 .csv, .txt, .xlsx, .xls 확장자가 있어야 합니다. "
+                f"내부 에러: {e}"
+            )
+
+    # 4) 그 외: CSV 또는 텍스트 (기존 동작)
+    return load_xps_csv(file_obj_or_path, source_name=source_name)
 
 
 # -------------------------------------------------------------------
