@@ -375,7 +375,7 @@ with st.sidebar:
         value=False,
         help=(
             "**BE offset 적용**: Binding Energy 축에 일정한 보정값을 더합니다.\n\n"
-            "**언제 사용하나요?**: 샘플의 충전(charging) 효과로 모든 피크가 일정하게 시프트된 경우.\n\n"
+            "**언제 사용하나요?**: 샘플의 charging 효과로 모든 피크가 일정하게 시프트된 경우.\n\n"
             "**일반 관행**: C 1s adventitious carbon 피크를 **284.8 eV**로 맞추기 위해 "
             "측정값과의 차이만큼 shift를 입력합니다.\n\n"
             "**예시**: C 1s가 286.3 eV에서 측정됐다면 → Shift = -1.5 eV로 설정."
@@ -437,7 +437,7 @@ if uploaded is None:
 **Survey 분석 기능**:
 1. 피크 자동 검출 (1차 미분 + prominence)
 2. **다중 라인 자기일관성 매칭** — 단일 피크 매칭의 가짜 양성 방지
-3. 충전(charging) 시프트 자동 처리
+3. charging 시프트 자동 처리
 4. 신뢰도 등급 (HIGH / MEDIUM / LOW)
 5. **근사 atomic %** 정량 (Scofield RSF 기반)
 
@@ -909,7 +909,7 @@ with tab_survey:
     st.markdown("#### 🌐 Survey 분석 — 원소 자동 식별 + 근사 정량")
     st.caption(
         "다중 라인 자기일관성 검증으로 원소를 식별합니다. "
-        "충전(charging) 시프트는 자동으로 흡수됩니다."
+        "charging 시프트는 자동으로 흡수됩니다."
     )
 
     col_s1, col_s2 = st.columns(2)
@@ -917,7 +917,7 @@ with tab_survey:
         tolerance = st.slider(
             "Primary line tolerance (eV)", 1.0, 8.0, 4.0, 0.5,
             help="검출 피크가 DB 위치에서 얼마나 벗어나도 매칭으로 인정할지. "
-                 "충전이 큰 샘플은 6~8 eV로."
+                 "Charge가 큰 샘플은 6~8 eV로."
         )
     with col_s2:
         min_prominence = st.slider(
