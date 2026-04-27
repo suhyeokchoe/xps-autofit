@@ -47,7 +47,6 @@ st.set_page_config(
         - License: MIT
         
         **참고 문헌**
-        - CasaXPS Cookbook (Casa Software Ltd, 2019)
         - Shirley, D. A. (1972). *Phys. Rev. B*, 5(12), 4709
         - Akaike, H. (1974). *IEEE Trans. Auto. Control*, 19(6), 716
         """
