@@ -15,23 +15,19 @@
 ## Project Background
 
 XPS AutoFit은 학부 연구 과정에서 마주친 **수동 XPS 피팅의 비효율성**을
-해결하고자 시작되었습니다. CasaXPS 같은 기존 도구는 강력하지만,
+해결하고자 시작되었습니다. 기존 피팅 프로그램도 충분히 좋지만,
 화학 환경별 컴포넌트 위치를 사용자가 일일이 입력해야 하는 노가다가
 연구자의 시간을 크게 소모합니다.
 
 이 프로젝트는 다음 가설을 검증합니다:
 
-> **"전문가의 판단 규칙(재료별 표준 컴포넌트, 물리 제약)을
-> 코드에 내장하면, AI/ML 없이도 논문 수준의 자동 피팅이 가능하다."**
-
-2026년 4월 개발 시작. 공익 목적의 학술 도구로 무상 제공됩니다.
+2026년 3월 개발 시작. 공익 목적의 학술 도구로 무상 제공됩니다.
 
 ---
 
 ## Acknowledgments
 
 - **경북대학교 신소재공학부** XPS 측정 데이터 제공
-- **CasaXPS Cookbook** (Casa Software Ltd, 2019) — 수치해석 알고리즘 참고
 - **NIST X-ray Photoelectron Spectroscopy Database** — 화학상태 reference 자료
 - **Streamlit Community Cloud** — 무료 호스팅 인프라 제공
 - **scipy / numpy** 오픈소스 커뮤니티 — 비선형 최소제곱·신호처리 라이브러리
