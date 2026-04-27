@@ -370,7 +370,17 @@ with st.sidebar:
 
     st.divider()
     st.header("🎯 Calibration")
-    apply_cal = st.checkbox("BE offset 적용", value=False)
+    apply_cal = st.checkbox(
+        "BE offset 적용",
+        value=False,
+        help=(
+            "**BE offset 적용**: Binding Energy 축에 일정한 보정값을 더합니다.\n\n"
+            "**언제 사용하나요?**: 샘플의 충전(charging) 효과로 모든 피크가 일정하게 시프트된 경우.\n\n"
+            "**일반 관행**: C 1s adventitious carbon 피크를 **284.8 eV**로 맞추기 위해 "
+            "측정값과의 차이만큼 shift를 입력합니다.\n\n"
+            "**예시**: C 1s가 286.3 eV에서 측정됐다면 → Shift = -1.5 eV로 설정."
+        )
+    )
     cal_shift = st.number_input(
         "Shift (eV)", value=0.0, step=0.05, format="%.2f",
         disabled=not apply_cal
@@ -771,8 +781,19 @@ with tab_expert:
                     "BE 중심 (eV)", value=float(c.be), step=0.05, format="%.2f",
                     key=f"be_{ukey}"
                 )
-                lock_pos = st.checkbox("위치 완전 고정", value=False,
-                                         key=f"lock_{ukey}")
+                lock_pos = st.checkbox(
+                    "위치 완전 고정",
+                    value=False,
+                    key=f"lock_{ukey}",
+                    help=(
+                        "**위치 완전 고정**: 이 컴포넌트의 BE 중심을 정확히 위 값에 고정합니다.\n\n"
+                        "**체크하면**: 피팅 중 BE가 절대 움직이지 않음. "
+                        "위 'BE 중심' 값이 그대로 유지됩니다.\n\n"
+                        "**체크 해제 시**: 'BE 이동 ± (eV)' 범위 안에서 자유롭게 이동 가능.\n\n"
+                        "**언제 고정하나요?**: 문헌에서 정확한 위치를 알고 있고, 그 위치가 절대적인 "
+                        "기준일 때 (예: 표준 reference 화합물의 알려진 BE)."
+                    )
+                )
             with cc2:
                 be_tol = st.number_input(
                     "BE 이동 ± (eV)", value=float(c.be_tol),
@@ -797,11 +818,44 @@ with tab_expert:
     st.markdown("#### 전역 제약")
     gc1, gc2, gc3 = st.columns(3)
     with gc1:
-        share_fwhm = st.checkbox("모든 컴포넌트 FWHM 공유", value=False)
+        share_fwhm = st.checkbox(
+            "모든 컴포넌트 FWHM 공유",
+            value=False,
+            help=(
+                "**FWHM 공유**: 같은 재료의 모든 컴포넌트가 동일한 FWHM 값을 갖도록 강제합니다.\n\n"
+                "**언제 사용하나요?**: 같은 화학 환경의 재료(예: 동일 MOF의 다양한 산소 환경)에서는 "
+                "물리적으로 FWHM이 비슷합니다. 공유로 강제하면 자유 파라미터가 줄어 "
+                "**과적합(overfitting) 방지**에 효과적입니다.\n\n"
+                "**효과**: 자유도 N개 → 1개로 줄어듦 (N=컴포넌트 수). "
+                "R²는 살짝 낮아질 수 있지만 결과의 화학적 신뢰도는 높아집니다."
+            )
+        )
     with gc2:
-        share_eta = st.checkbox("모든 컴포넌트 η 공유", value=False)
+        share_eta = st.checkbox(
+            "모든 컴포넌트 η 공유",
+            value=False,
+            help=(
+                "**η (eta) 공유**: 모든 컴포넌트가 동일한 Gauss-Lorentz 혼합비를 갖도록 강제합니다.\n\n"
+                "**η 의미**: pseudo-Voigt에서 η=0이면 순수 Gaussian, η=1이면 순수 Lorentzian, "
+                "그 사이는 혼합 비율입니다. 같은 측정 장비/조건에서는 η가 거의 일정합니다.\n\n"
+                "**언제 사용하나요?**: 같은 측정 조건의 동일 재료라면 거의 항상 켜는 것이 안전합니다. "
+                "**CasaXPS의 표준 관행**과 일치하는 설정입니다.\n\n"
+                "**효과**: 자유 파라미터 추가로 줄임. 결과가 화학적으로 더 안정됩니다."
+            )
+        )
     with gc3:
-        use_shirley_exp = st.checkbox("Shirley 배경 보정", value=True)
+        use_shirley_exp = st.checkbox(
+            "Shirley 배경 보정",
+            value=True,
+            help=(
+                "**Shirley 배경 보정**: iterative Shirley 알고리즘으로 비탄성 산란 배경을 제거합니다.\n\n"
+                "**언제 켜나요?**: 일반적인 raw XPS 데이터 (배경 미제거 상태). 거의 항상 ON.\n\n"
+                "**언제 끄나요?**: 데이터가 이미 배경 제거된 경우 "
+                "(예: 논문에서 normalized된 데이터, peak fitting 후 export된 데이터). "
+                "끄면 background = 0으로 가정합니다.\n\n"
+                "💡 사이드바의 'Background Anchor' 옵션과 함께 작동합니다."
+            )
+        )
 
     n_params = sum(1 + (0 if c.lock_position else 1)
                     + (0 if share_fwhm else 1)
