@@ -400,6 +400,100 @@ MATERIAL_HIERARCHY = {
     },
 
     # ============================================================
+    # Multi-oxidation states 군 — 한 원소의 여러 산화수 공존
+    # ============================================================
+    'Multi-oxidation states': {
+        'region': 'mixed',
+        'description': '같은 원소의 여러 산화수가 공존 (페로브스카이트, 배터리, 촉매 등)',
+        'materials': {
+            'Tin Perovskite (Sn3d)': {
+                'description': '페로브스카이트의 Sn²⁺/Sn⁴⁺ 공존 — perovskite solar cells',
+                'reference': 'Nat. Commun. 15, 9435 (2024); Sn perovskite literature',
+                'region': 'Sn3d',
+                'components': [
+                    # Sn²⁺ doublet — main + minor (spin-orbit 8.41 eV)
+                    # be_tol=1.0: 충전(charging) 시프트 흡수용 (절연체 페로브스카이트는 ±1 eV 흔함)
+                    # fwhm 0.7~1.2: 페로브스카이트의 좁은 피크에 맞춤 (NIST + 논문 표준)
+                    {'name': 'Sn²⁺ 3d₅/₂', 'be': 486.6, 'be_tol': 1.0, 'fwhm': (0.7, 1.2)},
+                    {'name': 'Sn²⁺ 3d₃/₂', 'be': 495.0, 'be_tol': 1.0, 'fwhm': (0.7, 1.2)},
+                    # Sn⁴⁺ doublet — main + minor (보통 약간 더 넓음)
+                    {'name': 'Sn⁴⁺ 3d₅/₂', 'be': 487.5, 'be_tol': 1.0, 'fwhm': (0.8, 1.5)},
+                    {'name': 'Sn⁴⁺ 3d₃/₂', 'be': 495.9, 'be_tol': 1.0, 'fwhm': (0.8, 1.5)},
+                ],
+                'note': ('Sn²⁺와 Sn⁴⁺의 BE 차이는 ~0.9 eV로 작음. '
+                         'be_tol=1.0은 페로브스카이트의 충전(charging) 시프트 흡수용. '
+                         'FWHM 공유 + η 공유 권장.'),
+            },
+            'Copper oxidation (Cu2p)': {
+                'description': 'Cu⁺/Cu²⁺ 공존 — 촉매, 전극 표면',
+                'reference': 'Biesinger Appl. Surf. Sci. (2017); NIST',
+                'region': 'Cu2p',
+                'components': [
+                    {'name': 'Cu⁺ 2p₃/₂', 'be': 932.4, 'be_tol': 0.4, 'fwhm': (0.9, 2.0)},
+                    {'name': 'Cu⁺ 2p₁/₂', 'be': 952.2, 'be_tol': 0.4, 'fwhm': (0.9, 2.0)},
+                    {'name': 'Cu²⁺ 2p₃/₂', 'be': 933.7, 'be_tol': 0.4, 'fwhm': (1.0, 2.5)},
+                    {'name': 'Cu²⁺ 2p₁/₂', 'be': 953.5, 'be_tol': 0.4, 'fwhm': (1.0, 2.5)},
+                ],
+                'optional_components': [
+                    {'name': 'Cu²⁺ satellite (~940 eV)', 'be': 940.0, 'be_tol': 1.0, 'fwhm': (2.0, 5.0),
+                     'hint': 'Cu²⁺의 강한 shake-up satellite, 정량 시 중요'},
+                    {'name': 'Cu²⁺ satellite (~960 eV)', 'be': 960.0, 'be_tol': 1.0, 'fwhm': (2.0, 5.0),
+                     'hint': 'Cu²⁺의 2p1/2 satellite'},
+                ],
+                'note': 'Cu²⁺는 satellite peak이 강해서 옵션 추가를 권장합니다.',
+            },
+            'Iron oxidation (Fe2p)': {
+                'description': 'Fe²⁺/Fe³⁺ 공존 — Fe₃O₄, Fe₂O₃-FeO 혼합 등',
+                'reference': 'Yamashita & Hayes (2008); Biesinger',
+                'region': 'Fe2p',
+                'components': [
+                    {'name': 'Fe²⁺ 2p₃/₂', 'be': 709.8, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                    {'name': 'Fe²⁺ 2p₁/₂', 'be': 723.0, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                    {'name': 'Fe³⁺ 2p₃/₂', 'be': 711.0, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                    {'name': 'Fe³⁺ 2p₁/₂', 'be': 724.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                ],
+                'optional_components': [
+                    {'name': 'Fe²⁺ satellite (~715 eV)', 'be': 715.0, 'be_tol': 1.0, 'fwhm': (2.0, 4.0),
+                     'hint': 'Fe²⁺ shake-up'},
+                    {'name': 'Fe³⁺ satellite (~719 eV)', 'be': 719.0, 'be_tol': 1.0, 'fwhm': (2.0, 4.0),
+                     'hint': 'Fe³⁺ shake-up'},
+                ],
+                'note': 'Fe도 satellite peak 강함. 분리 매우 어려운 케이스 — 결과 해석 주의.',
+            },
+            'Titanium oxidation (Ti2p)': {
+                'description': 'Ti³⁺/Ti⁴⁺ 공존 — defective TiO₂, Ti suboxides',
+                'reference': 'NIST; Diebold Surf. Sci. Rep. (2003)',
+                'region': 'Ti2p',
+                'components': [
+                    {'name': 'Ti³⁺ 2p₃/₂', 'be': 457.7, 'be_tol': 0.4, 'fwhm': (1.0, 2.0)},
+                    {'name': 'Ti³⁺ 2p₁/₂', 'be': 463.4, 'be_tol': 0.4, 'fwhm': (1.0, 2.0)},
+                    {'name': 'Ti⁴⁺ 2p₃/₂', 'be': 458.8, 'be_tol': 0.4, 'fwhm': (0.9, 1.8)},
+                    {'name': 'Ti⁴⁺ 2p₁/₂', 'be': 464.5, 'be_tol': 0.4, 'fwhm': (0.9, 1.8)},
+                ],
+                'note': 'Ti³⁺는 oxygen vacancy의 신호 — defective TiO₂에서 관찰',
+            },
+            'Manganese oxidation (Mn2p)': {
+                'description': 'Mn²⁺/Mn³⁺/Mn⁴⁺ 공존 — battery cathodes (LMO, NMC)',
+                'reference': 'Biesinger Appl. Surf. Sci. (2011); battery literature',
+                'region': 'Mn2p',
+                'components': [
+                    {'name': 'Mn²⁺ 2p₃/₂', 'be': 640.7, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                    {'name': 'Mn²⁺ 2p₁/₂', 'be': 652.2, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                    {'name': 'Mn⁴⁺ 2p₃/₂', 'be': 642.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                    {'name': 'Mn⁴⁺ 2p₁/₂', 'be': 654.1, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                ],
+                'optional_components': [
+                    {'name': 'Mn³⁺ 2p₃/₂', 'be': 641.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0),
+                     'hint': '중간 산화수 — Mn₂O₃, Mn₃O₄에서 관찰'},
+                    {'name': 'Mn³⁺ 2p₁/₂', 'be': 653.0, 'be_tol': 0.5, 'fwhm': (1.5, 3.0),
+                     'hint': 'Mn³⁺의 minor doublet'},
+                ],
+                'note': 'Mn은 3개 산화수 모두 가능 — Mn³⁺는 옵션으로 추가하세요.',
+            },
+        },
+    },
+
+    # ============================================================
     # 단순 region 모음 (재료 정보 없을 때 fallback)
     # ============================================================
     'Other (region only)': {

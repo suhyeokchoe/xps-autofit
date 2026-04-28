@@ -19,7 +19,7 @@ from xps_engine import (
     load_xps_csv, load_xps_data, auto_fit_v3, fit_n_peaks, fit_n_doublets,
     shirley_background, detect_peaks_v2, pseudo_voigt,
     calibrate_shift,
-    ELEMENT_PRIORS, DOUBLET_PRIORS, is_doublet,
+    ELEMENT_PRIORS, DOUBLET_PRIORS, MULTI_OX_PRIORS, is_doublet,
 )
 from xps_expert import (
     MATERIAL_TEMPLATES, ComponentSpec,
@@ -763,6 +763,12 @@ with tab_auto:
                 tot = sum(c['area'] for c in components) or 1
                 for c in components:
                     c['area_pct'] = 100 * c['area'] / tot
+                # 화학적 라벨링 (다중 산화수 원소면 Sn²⁺ 등으로)
+                _eff_region = eff_meta.get('region')
+                if (is_doublet(_eff_region) and not force_singlet
+                        and _eff_region in MULTI_OX_PRIORS):
+                    from xps_engine import label_components_by_oxidation
+                    components = label_components_by_oxidation(components, _eff_region)
                 result = {
                     'success': True,
                     'mode': 'doublet' if is_doublet(eff_meta.get('region')) and not force_singlet else 'singlet',

@@ -60,6 +60,187 @@ DOUBLET_PRIORS = {
 }
 
 
+# ===================================================================
+# MULTI_OX_PRIORS — 다중 산화수 (Multi-oxidation state) 원소
+# ===================================================================
+# 자동 라벨링과 Expert 템플릿이 공유하는 single source of truth.
+#
+# 구조:
+#   region: {
+#       'low_ox':  {산화수 낮은 상태},   # BE 작은 쪽 = 환원
+#       'high_ox': {산화수 높은 상태},   # BE 큰 쪽 = 산화
+#       'split': spin-orbit 분열 (eV),
+#       'ratio': main/minor 면적비 (=DOUBLET_PRIORS의 ratio와 동일)
+#   }
+#
+# 위치값 출처: NIST XPS DB + 표준 reference
+# ===================================================================
+
+MULTI_OX_PRIORS = {
+    # Sn 3d — 페로브스카이트, 배터리, 광촉매
+    'Sn3d': {
+        'low_ox':  {'name': 'Sn²⁺', 'be_main': 486.6, 'be_minor': 495.0,
+                     'description': '환원된 주석 (Sn metal, 페로브스카이트의 Sn(II))'},
+        'high_ox': {'name': 'Sn⁴⁺', 'be_main': 487.5, 'be_minor': 495.9,
+                     'description': '산화된 주석 (SnO2, 산화 분획)'},
+        'split': 8.41, 'ratio': 1.5,  # 3:2 (3d5/2 : 3d3/2)
+        'be_diff_typical': 0.9,  # high_ox - low_ox 일반 차이
+    },
+    # Cu 2p — 촉매, 전극
+    'Cu2p': {
+        'low_ox':  {'name': 'Cu⁺ (Cu₂O)', 'be_main': 932.4, 'be_minor': 952.2,
+                     'description': '제1구리 (Cu(I) 또는 Cu metal — 거의 동일)'},
+        'high_ox': {'name': 'Cu²⁺ (CuO)',  'be_main': 933.7, 'be_minor': 953.5,
+                     'description': '제2구리 (CuO, satellite peak 동반)'},
+        'split': 19.8, 'ratio': 2.0,
+        'be_diff_typical': 1.3,
+        'note': 'Cu²⁺는 940 eV 부근에 강한 satellite peak이 있어 추가 컴포넌트 필요할 수 있음',
+    },
+    # Fe 2p — 자성, 광촉매
+    'Fe2p': {
+        'low_ox':  {'name': 'Fe²⁺ (FeO)',     'be_main': 709.8, 'be_minor': 723.0,
+                     'description': '제1철 (FeO, Fe₃O₄의 일부)'},
+        'high_ox': {'name': 'Fe³⁺ (Fe₂O₃)',   'be_main': 711.0, 'be_minor': 724.5,
+                     'description': '제2철 (Fe₂O₃, FeOOH)'},
+        'split': 13.6, 'ratio': 2.0,
+        'be_diff_typical': 1.2,
+        'note': 'Fe²⁺와 Fe³⁺ 모두 satellite peak 동반, 분리 어려움',
+    },
+    # Ti 2p — 광촉매 (defective TiO₂)
+    'Ti2p': {
+        'low_ox':  {'name': 'Ti³⁺',         'be_main': 457.7, 'be_minor': 463.4,
+                     'description': '결함성 TiO₂ (oxygen vacancy 동반)'},
+        'high_ox': {'name': 'Ti⁴⁺ (TiO₂)',  'be_main': 458.8, 'be_minor': 464.5,
+                     'description': '정상 TiO₂'},
+        'split': 5.7, 'ratio': 2.0,
+        'be_diff_typical': 1.1,
+    },
+    # Mn 2p — 배터리 cathode (3가지 산화수 가능)
+    'Mn2p': {
+        'low_ox':  {'name': 'Mn²⁺',  'be_main': 640.7, 'be_minor': 652.2,
+                     'description': 'MnO 같은 환원 상태'},
+        'high_ox': {'name': 'Mn⁴⁺',  'be_main': 642.5, 'be_minor': 654.1,
+                     'description': 'MnO₂ 같은 산화 상태'},
+        # Mn³⁺도 흔하지만 Mn²⁺와 Mn⁴⁺ 사이라서 자동 분리 어려움
+        'mid_ox':  {'name': 'Mn³⁺',  'be_main': 641.5, 'be_minor': 653.0,
+                     'description': 'Mn₂O₃, Mn₃O₄의 일부 (Expert 모드에서 옵션)'},
+        'split': 11.5, 'ratio': 2.0,
+        'be_diff_typical': 1.8,
+        'note': 'Mn은 Mn²⁺/Mn³⁺/Mn⁴⁺ 3가지 모두 가능. 자동 모드는 2개만 분리, '
+                  'Expert 모드에서 Mn³⁺ 옵션 추가 가능',
+    },
+}
+
+
+def is_multi_ox(region):
+    """region이 다중 산화수 원소인가"""
+    return region in MULTI_OX_PRIORS
+
+
+# ===================================================================
+# Auto-labeling helper — 자동 모드 결과에 화학적 라벨 부여
+# ===================================================================
+def label_components_by_oxidation(components, region, n_doublets=None):
+    """
+    auto_fit_v3 결과의 components에 화학적 라벨 (Sn²⁺ 3d5/2 등) 부여.
+
+    Args:
+        components: list of dict (각 dict는 'position', 'label' 등 가짐)
+        region: 'Sn3d', 'Cu2p' 등
+        n_doublets: doublet 개수 (None이면 자동 추정)
+
+    Returns:
+        라벨이 갱신된 components (in-place + return)
+
+    동작:
+    - region이 MULTI_OX_PRIORS에 있으면:
+      * doublet 1개 → 가장 흔한 산화수로 (보통 high_ox = M-O)
+      * doublet 2개 → 낮은 BE = low_ox, 높은 BE = high_ox
+    - 일반 doublet (Au4f, In3d 등)이면 → 'Au 4f7/2' 같은 단순 라벨
+    """
+    if not components:
+        return components
+
+    # main/minor pair 식별 — components는 BE 내림차순 정렬됨
+    # (xps_engine의 fit_n_doublets가 main, minor 순으로 components를 만듦)
+    # 하지만 정렬 후엔 high BE → low BE 순서가 됨
+    # main = 낮은 BE의 doublet, minor = 높은 BE의 doublet
+
+    # 각 component가 'main' 인지 'minor' 인지 라벨에서 추정
+    has_main = any('main' in c.get('label', '').lower() for c in components)
+    has_state = any('state' in c.get('label', '').lower() for c in components)
+
+    if not (has_main or has_state):
+        # singlet 또는 doublet 아닌 경우 — 라벨 그대로
+        return components
+
+    # doublet 그룹화: 같은 'State N'끼리 묶기
+    groups = {}
+    for c in components:
+        lab = c.get('label', '')
+        # 'State 1 (main)', 'State 2 (minor)' 같은 형태에서 'State 1', 'State 2' 추출
+        import re
+        m = re.match(r'(State\s+\d+)', lab)
+        if m:
+            key = m.group(1)
+        else:
+            key = 'Default'
+        groups.setdefault(key, []).append(c)
+
+    n_groups = len(groups)
+
+    # MULTI_OX_PRIORS에 있는 region이면 화학적 라벨
+    if region in MULTI_OX_PRIORS:
+        prior = MULTI_OX_PRIORS[region]
+
+        # 각 group의 main 위치(낮은 BE) 기준으로 정렬
+        def main_position(group):
+            """group 안에서 main(낮은 BE) 컴포넌트의 position"""
+            return min(c['position'] for c in group)
+
+        sorted_groups = sorted(groups.items(), key=lambda kv: main_position(kv[1]))
+
+        # n_groups에 따라 산화수 부여
+        if n_groups == 1:
+            # doublet 1개 — main 위치로 low/high 판단
+            # low_ox와 high_ox의 중간값을 기준으로
+            single_main_be = main_position(sorted_groups[0][1])
+            mid_be = (prior['low_ox']['be_main'] + prior['high_ox']['be_main']) / 2
+            if single_main_be < mid_be:
+                ox_assignment = [prior['low_ox']]   # 낮은 BE → 환원
+            else:
+                ox_assignment = [prior['high_ox']]  # 높은 BE → 산화
+        elif n_groups == 2:
+            # 2개 → 낮은 BE = low_ox, 높은 BE = high_ox
+            ox_assignment = [prior['low_ox'], prior['high_ox']]
+        else:
+            # 3개 이상은 자동 라벨 어려움 — 그대로 두기
+            return components
+
+        # region에 따라 main/minor의 코어 레벨 이름
+        if region.endswith('3d'):
+            main_lvl, minor_lvl = '3d₅/₂', '3d₃/₂'
+        elif region.endswith('2p'):
+            main_lvl, minor_lvl = '2p₃/₂', '2p₁/₂'
+        elif region.endswith('4f'):
+            main_lvl, minor_lvl = '4f₇/₂', '4f₅/₂'
+        else:
+            main_lvl, minor_lvl = 'main', 'minor'
+
+        # 각 group에 라벨 부여
+        for (group_key, group), ox in zip(sorted_groups, ox_assignment):
+            # group 안에서 main(낮은 BE) / minor(높은 BE) 구분
+            sorted_in_group = sorted(group, key=lambda c: c['position'])
+            for i, c in enumerate(sorted_in_group):
+                lvl = main_lvl if i == 0 else minor_lvl
+                c['label'] = f"{ox['name']} {lvl}"
+
+    return components
+
+
+# ===================================================================
+
+
 def detect_region(be_min, be_max):
     candidates = []
     for name, tup in ELEMENT_PRIORS.items():
@@ -873,6 +1054,11 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=4, bg_kwargs=None):
     total_area = sum(c['area'] for c in components) or 1
     for c in components:
         c['area_pct'] = 100 * c['area'] / total_area
+
+    # ---- 화학적 라벨 자동 부여 (다중 산화수 원소) ----
+    # doublet 모드 + region이 MULTI_OX_PRIORS에 있을 때만
+    if best['mode'] == 'doublet' and region in MULTI_OX_PRIORS:
+        components = label_components_by_oxidation(components, region)
 
     trial_summary = [{'n_peaks': t['n_peaks'], 'r2': t['r2'],
                       'rms': t['rms'], 'aic': t['aic'],
