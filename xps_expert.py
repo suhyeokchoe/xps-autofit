@@ -166,9 +166,350 @@ MATERIAL_TEMPLATES = {
 }
 
 
-# -------------------------------------------------------------------
-# 컴포넌트 스펙 클래스 (사용자 편집 가능)
-# -------------------------------------------------------------------
+# ===================================================================
+# Hierarchical Material Library (v1.2)
+# ===================================================================
+# 사용자가 "재료군 → 구체 재료 → 컴포넌트" 단계로 선택하는 새 구조.
+# 기존 MATERIAL_TEMPLATES도 유지 (multi-match 호환성).
+#
+# Region별 BE/FWHM은 NIST XPS DB + 분야별 표준 논문 기반.
+# OV (Oxygen Vacancy) 위치는 재료별로 다름 — 논문 그대로 유지.
+# ===================================================================
+
+MATERIAL_HIERARCHY = {
+    # ============================================================
+    # Metal Oxide 군 — O1s region
+    # ============================================================
+    'Metal Oxide': {
+        'region': 'O1s',
+        'description': '금속 산화물 (TiO2, SnO2, ZnO 등)',
+        'materials': {
+            'TiO2': {
+                'description': 'Titanium dioxide — 광촉매, 페로브스카이트 ETL',
+                'reference': 'Nat. Commun. 15, 9435 (2024); NIST XPS DB',
+                'components': [
+                    {'name': 'TiO2 lattice O', 'be': 530.5, 'be_tol': 0.3, 'fwhm': (1.0, 2.0)},
+                    {'name': 'OV (Oxygen Vacancy)', 'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                    {'name': 'Non-lattice O / OH', 'be': 532.1, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                ],
+                'optional_components': [
+                    {'name': 'Adsorbed water', 'be': 533.0, 'be_tol': 0.4, 'fwhm': (1.2, 2.5),
+                     'hint': '예: 표면 흡착 H2O, ambient 노출 시 빈번'},
+                ],
+            },
+            'SnO2': {
+                'description': 'Tin dioxide — TCO, 페로브스카이트 ETL',
+                'reference': 'NIST; Wang et al. JMCA 2017',
+                'components': [
+                    {'name': 'SnO2 lattice O', 'be': 530.6, 'be_tol': 0.3, 'fwhm': (1.0, 2.0)},
+                    {'name': 'OV (Oxygen Vacancy)', 'be': 531.5, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                    {'name': 'OH / adsorbed', 'be': 532.4, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                ],
+            },
+            'ZnO': {
+                'description': 'Zinc oxide — TCO, 광촉매, ETL',
+                'reference': 'NIST XPS DB',
+                'components': [
+                    {'name': 'ZnO lattice O', 'be': 530.2, 'be_tol': 0.3, 'fwhm': (1.0, 2.0)},
+                    {'name': 'OV (Oxygen Vacancy)', 'be': 531.2, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                    {'name': 'OH / adsorbed water', 'be': 532.4, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                ],
+            },
+            'Fe2O3': {
+                'description': 'Hematite (α-Fe2O3) — 광촉매, 자성',
+                'reference': 'NIST; Yamashita & Hayes (2008)',
+                'components': [
+                    {'name': 'Fe-O lattice', 'be': 530.0, 'be_tol': 0.3, 'fwhm': (1.0, 2.0)},
+                    {'name': 'OH / FeOOH', 'be': 531.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.2)},
+                ],
+                'optional_components': [
+                    {'name': 'OV (Oxygen Vacancy)', 'be': 531.0, 'be_tol': 0.4, 'fwhm': (1.0, 2.0),
+                     'hint': '환원된 hematite 또는 nano structure에서 관찰'},
+                    {'name': 'Adsorbed water', 'be': 533.0, 'be_tol': 0.4, 'fwhm': (1.2, 2.5),
+                     'hint': '예: ambient 노출 시'},
+                ],
+            },
+            'NiO': {
+                'description': 'Nickel oxide — pin-type 페로브스카이트 HTL',
+                'reference': 'NIST; Biesinger et al. Surf. Interface Anal. (2011)',
+                'components': [
+                    {'name': 'NiO lattice O', 'be': 529.6, 'be_tol': 0.3, 'fwhm': (0.9, 1.8)},
+                    {'name': 'Ni3+ surface (Ni2O3)', 'be': 531.1, 'be_tol': 0.3, 'fwhm': (1.0, 2.0)},
+                    {'name': 'OH / adsorbed', 'be': 532.5, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                ],
+            },
+            'Cu2O / CuO': {
+                'description': 'Copper oxides — Cu2O와 CuO는 BE 약간 다름',
+                'reference': 'NIST; Biesinger Appl. Surf. Sci. (2017)',
+                'components': [
+                    {'name': 'Cu-O lattice', 'be': 530.2, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
+                    {'name': 'OH / Cu(OH)2', 'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                ],
+                'optional_components': [
+                    {'name': 'Adsorbed water', 'be': 533.0, 'be_tol': 0.4, 'fwhm': (1.2, 2.5),
+                     'hint': '예: ambient 노출 시'},
+                ],
+            },
+            'Al2O3': {
+                'description': 'Aluminum oxide — 절연체, 패시베이션 layer',
+                'reference': 'NIST; Rotole & Sherwood (1998)',
+                'components': [
+                    {'name': 'Al-O lattice', 'be': 531.0, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+                    {'name': 'OH / hydroxide', 'be': 532.5, 'be_tol': 0.3, 'fwhm': (1.2, 2.2)},
+                ],
+                'optional_components': [
+                    {'name': 'Adsorbed water', 'be': 533.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.5),
+                     'hint': '예: 표면 흡착 H2O'},
+                ],
+            },
+            'In2O3': {
+                'description': 'Indium oxide — ITO 기판의 In 성분',
+                'reference': 'NIST; Donley et al. Langmuir (2002)',
+                'components': [
+                    {'name': 'In-O lattice', 'be': 530.0, 'be_tol': 0.3, 'fwhm': (1.0, 2.0)},
+                    {'name': 'OH / defect', 'be': 531.5, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                ],
+                'optional_components': [
+                    {'name': 'Adsorbed water', 'be': 532.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.5),
+                     'hint': '예: ITO 표면 흡착'},
+                ],
+            },
+            'Generic (other oxides)': {
+                'description': '위에 없는 일반 금속 산화물',
+                'reference': 'NIST XPS DB (typical values)',
+                'components': [
+                    {'name': 'M-O (lattice oxygen)', 'be': 530.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
+                    {'name': 'O-H / defect', 'be': 531.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.2)},
+                    {'name': 'C=O / adsorbed water', 'be': 532.5, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
+                ],
+                'optional_components': [
+                    {'name': 'OV (Oxygen Vacancy)', 'be': 531.2, 'be_tol': 0.5, 'fwhm': (1.0, 2.2),
+                     'hint': '재료별로 위치 다름 — 일반적 추정값'},
+                ],
+            },
+        },
+    },
+
+    # ============================================================
+    # MOF 군 — O1s region
+    # ============================================================
+    'MOF': {
+        'region': 'O1s',
+        'description': '금속-유기 골격체 (Metal-Organic Framework)',
+        'materials': {
+            'Zr-based (UiO-66/67, MOF-801/867)': {
+                'description': 'Zr-oxo cluster + carboxylate linker',
+                'reference': 'Nat. Commun. 16, 162 (2025); Wang et al. JMCA 2017',
+                'components': [
+                    {'name': 'Zr-O-Zr (oxo cluster)', 'be': 529.4, 'be_tol': 0.3, 'fwhm': (0.9, 2.0)},
+                    {'name': 'Zr-O-C (carboxylate linker)', 'be': 530.7, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                    {'name': 'Zr-O-H (hydroxyl / adsorbed water)', 'be': 532.1, 'be_tol': 0.2, 'fwhm': (1.0, 2.2)},
+                ],
+                'optional_components': [
+                    {'name': 'S=O (sulfonate group)', 'be': 531.6, 'be_tol': 0.3, 'fwhm': (1.0, 1.8),
+                     'hint': '예: sulfate, sulfonate, TFSI/TFS 이온성 액체, 황 함유 분자'},
+                    {'name': 'C=O (carbonyl)', 'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.0, 2.0),
+                     'hint': '예: carbonyl, ketone, aldehyde'},
+                    {'name': 'O-C=O (carboxylate organic)', 'be': 533.5, 'be_tol': 0.3, 'fwhm': (1.0, 2.0),
+                     'hint': '예: 자유 carboxylic acid (linker가 아닌)'},
+                ],
+            },
+            'Generic (other metal MOFs)': {
+                'description': '다른 metal MOF (Cu, Fe, Zn 기반 등)',
+                'reference': 'NIST + 분야별 표준값 (재료별 미세 차이 있음)',
+                'components': [
+                    {'name': 'M-O-M (metal-oxo)', 'be': 529.8, 'be_tol': 0.5, 'fwhm': (0.9, 2.0)},
+                    {'name': 'M-O-C (carboxylate linker)', 'be': 531.0, 'be_tol': 0.4, 'fwhm': (1.0, 2.2)},
+                    {'name': 'M-O-H / hydroxyl', 'be': 532.2, 'be_tol': 0.3, 'fwhm': (1.0, 2.2)},
+                ],
+                'optional_components': [
+                    {'name': 'S=O (sulfonate group)', 'be': 531.6, 'be_tol': 0.3, 'fwhm': (1.0, 1.8),
+                     'hint': '예: TFSI 등 황 함유'},
+                    {'name': 'C=O (carbonyl)', 'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.0, 2.0),
+                     'hint': '예: 자유 carbonyl'},
+                ],
+            },
+        },
+    },
+
+    # ============================================================
+    # Polymer 군
+    # ============================================================
+    'Polymer': {
+        'region': 'O1s',  # 기본은 O1s, 하위에서 region 다를 수 있음
+        'description': '유기 고분자',
+        'materials': {
+            'With O functionalities (O1s)': {
+                'description': 'PMMA, PEG, PVA 등 산소 함유 polymer',
+                'reference': 'Beamson & Briggs High-Res XPS of Organic Polymers',
+                'region': 'O1s',
+                'components': [
+                    {'name': 'C=O (carbonyl)', 'be': 531.3, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+                    {'name': 'C-O (ether / alcohol)', 'be': 532.8, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+                    {'name': 'O-C=O (carboxylate / ester)', 'be': 533.5, 'be_tol': 0.3, 'fwhm': (1.2, 2.0)},
+                ],
+                'optional_components': [
+                    {'name': 'S=O (sulfonate group)', 'be': 531.6, 'be_tol': 0.3, 'fwhm': (1.0, 1.8),
+                     'hint': '예: 황화 polymer (Nafion 등)'},
+                    {'name': 'M-O (metal oxide impurity)', 'be': 530.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0),
+                     'hint': '예: 표면 metal oxide 잔류물'},
+                ],
+            },
+            'C1s — typical organic polymer': {
+                'description': 'PE, PMMA, PS 등 일반 polymer C1s',
+                'reference': 'Beamson & Briggs',
+                'region': 'C1s',
+                'components': [
+                    {'name': 'C-C / C-H (aliphatic)', 'be': 284.8, 'be_tol': 0.1, 'fwhm': (0.9, 1.5)},
+                    {'name': 'C-O (ether / alcohol)', 'be': 286.3, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+                    {'name': 'C=O (carbonyl)', 'be': 287.8, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+                    {'name': 'O-C=O (carboxylate / ester)', 'be': 288.9, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+                ],
+                'optional_components': [
+                    {'name': 'C-F (covalent fluoride)', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.0, 1.6),
+                     'hint': '예: PVDF 등'},
+                    {'name': 'CF2 (perfluoro)', 'be': 291.5, 'be_tol': 0.3, 'fwhm': (1.0, 1.6),
+                     'hint': '예: PTFE, Nafion'},
+                    {'name': 'CF3 (terminal trifluoro)', 'be': 293.5, 'be_tol': 0.3, 'fwhm': (1.0, 1.6),
+                     'hint': '예: TFSI 이온성 액체'},
+                    {'name': 'C-N', 'be': 286.0, 'be_tol': 0.3, 'fwhm': (1.0, 1.6),
+                     'hint': '예: amine, amide 함유'},
+                    {'name': 'π-π* shake-up', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0),
+                     'hint': '예: aromatic polymer'},
+                ],
+            },
+            'Graphitic carbon (C1s)': {
+                'description': '흑연/graphene/CNT/CNF',
+                'reference': 'Carbon 65, 249 (2013)',
+                'region': 'C1s',
+                'components': [
+                    {'name': 'sp2 C=C (graphitic)', 'be': 284.4, 'be_tol': 0.1, 'fwhm': (0.7, 1.2)},
+                    {'name': 'sp3 C-C (defect)', 'be': 285.2, 'be_tol': 0.2, 'fwhm': (0.9, 1.5)},
+                    {'name': 'C-O (oxidized surface)', 'be': 286.3, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+                    {'name': 'C=O (carbonyl on edge)', 'be': 287.8, 'be_tol': 0.3, 'fwhm': (1.0, 1.6)},
+                    {'name': 'π-π* shake-up', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                ],
+                'optional_components': [
+                    {'name': 'O-C=O (carboxylate edge)', 'be': 288.9, 'be_tol': 0.3, 'fwhm': (1.0, 1.6),
+                     'hint': '예: 산화된 graphene edge'},
+                    {'name': 'C-F', 'be': 290.5, 'be_tol': 0.5, 'fwhm': (1.0, 1.6),
+                     'hint': '예: fluorinated graphene'},
+                ],
+            },
+        },
+    },
+
+    # ============================================================
+    # 단순 region 모음 (재료 정보 없을 때 fallback)
+    # ============================================================
+    'Other (region only)': {
+        'region': 'mixed',
+        'description': '재료 정보 없이 region만 알 때',
+        'materials': {
+            'F1s (fluorinated)': {
+                'description': '불소 함유 화합물 일반',
+                'reference': 'NIST XPS DB',
+                'region': 'F1s',
+                'components': [
+                    {'name': 'M-F (ionic / metal fluoride)', 'be': 685.5, 'be_tol': 0.5, 'fwhm': (1.2, 2.5)},
+                    {'name': 'C-F (covalent / organic)', 'be': 688.5, 'be_tol': 0.5, 'fwhm': (1.5, 3.0)},
+                ],
+                'optional_components': [
+                    {'name': 'F (semi-ionic, e.g. graphite-F)', 'be': 687.0, 'be_tol': 0.5, 'fwhm': (1.5, 2.5),
+                     'hint': '예: fluorinated graphene, GIC'},
+                ],
+            },
+            'N1s (nitrogen-containing)': {
+                'description': '질소 함유 화합물 일반',
+                'reference': 'Beamson & Briggs; NIST',
+                'region': 'N1s',
+                'components': [
+                    {'name': 'C-N (amine / amide)', 'be': 399.5, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
+                    {'name': 'C=N (imine / pyridinic)', 'be': 398.5, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
+                ],
+                'optional_components': [
+                    {'name': 'N-O (nitro / nitrite)', 'be': 405.0, 'be_tol': 0.8, 'fwhm': (1.2, 2.5),
+                     'hint': '예: -NO2, nitrite'},
+                    {'name': 'N+ (protonated / ammonium)', 'be': 401.5, 'be_tol': 0.5, 'fwhm': (1.0, 2.0),
+                     'hint': '예: -NH3+, imidazolium'},
+                    {'name': 'Pyrrolic N', 'be': 400.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.0),
+                     'hint': '예: 질소 도핑 carbon'},
+                    {'name': 'Graphitic N', 'be': 401.0, 'be_tol': 0.4, 'fwhm': (1.2, 2.0),
+                     'hint': '예: 질소 도핑 graphene'},
+                ],
+            },
+        },
+    },
+}
+
+
+def get_hierarchy_families():
+    """재료군 목록 반환 (1단계 dropdown용)"""
+    return list(MATERIAL_HIERARCHY.keys())
+
+
+def get_hierarchy_materials(family: str):
+    """특정 재료군의 구체 재료 목록 (2단계 dropdown용)"""
+    if family not in MATERIAL_HIERARCHY:
+        return []
+    return list(MATERIAL_HIERARCHY[family]['materials'].keys())
+
+
+def get_hierarchy_template(family: str, material: str):
+    """선택된 재료의 템플릿 dict 반환 (기존 MATERIAL_TEMPLATES와 같은 형식)"""
+    if family not in MATERIAL_HIERARCHY:
+        return None
+    family_data = MATERIAL_HIERARCHY[family]
+    if material not in family_data['materials']:
+        return None
+    mat = family_data['materials'][material]
+    # region 결정: material에 명시되어 있으면 그것, 없으면 family region 상속
+    region = mat.get('region', family_data.get('region', 'unknown'))
+    return {
+        'region': region,
+        'description': mat['description'],
+        'reference': mat.get('reference', ''),
+        'components': mat['components'],
+        'optional_components': mat.get('optional_components', []),
+    }
+
+
+def hierarchy_components(family: str, material: str,
+                           include_optional: List[str] = None) -> List['ComponentSpec']:
+    """계층 선택으로부터 ComponentSpec 리스트 생성 (Expert UI용)"""
+    tmpl = get_hierarchy_template(family, material)
+    if tmpl is None:
+        raise ValueError(f"Unknown material: {family} / {material}")
+    specs = []
+    for c in tmpl['components']:
+        specs.append(ComponentSpec(
+            name=c['name'], be=c['be'], be_tol=c['be_tol'],
+            fwhm_min=c['fwhm'][0], fwhm_max=c['fwhm'][1]
+        ))
+    include_optional = include_optional or []
+    for c in tmpl.get('optional_components', []):
+        if c['name'] in include_optional:
+            specs.append(ComponentSpec(
+                name=c['name'], be=c['be'], be_tol=c['be_tol'],
+                fwhm_min=c['fwhm'][0], fwhm_max=c['fwhm'][1]
+            ))
+    return specs
+
+
+def find_default_material_for_region(region: str):
+    """
+    region이 주어지면 그 region에 해당하는 (family, material) 쌍 후보 반환.
+    Auto-suggest 기능에서 사용.
+
+    Returns: list of (family, material) tuples, 가장 일반적인 것 먼저
+    """
+    candidates = []
+    for fam_name, fam in MATERIAL_HIERARCHY.items():
+        for mat_name, mat in fam['materials'].items():
+            mat_region = mat.get('region', fam.get('region', ''))
+            if mat_region == region or fam.get('region') == region:
+                candidates.append((fam_name, mat_name))
+    return candidates
 @dataclass
 class ComponentSpec:
     name: str

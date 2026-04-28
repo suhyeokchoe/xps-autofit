@@ -24,6 +24,9 @@ from xps_engine import (
 from xps_expert import (
     MATERIAL_TEMPLATES, ComponentSpec,
     components_from_template, expert_fit,
+    MATERIAL_HIERARCHY, get_hierarchy_families, get_hierarchy_materials,
+    get_hierarchy_template, hierarchy_components,
+    find_default_material_for_region,
 )
 from xps_survey import (
     analyze_survey, is_survey_scan, ELEMENT_DB,
@@ -901,8 +904,33 @@ with tab_expert:
                                         clean_name = r.template_name.replace(
                                             ' [free position]', ''
                                         )
-                                        st.session_state['exp_template'] = clean_name
-                                        st.session_state['exp_template_applied'] = clean_name
+                                        # 평면 이름 → (family, material) 매핑
+                                        # 일관성: 자동 제안 후 Expert에서 같은 재료가 자동 선택됨
+                                        flat_to_hierarchy = {
+                                            'MOF (Zr-based)':
+                                                ('MOF', 'Zr-based (UiO-66/67, MOF-801/867)'),
+                                            'Metal oxide (generic)':
+                                                ('Metal Oxide', 'Generic (other oxides)'),
+                                            'Polymer with O (O1s)':
+                                                ('Polymer', 'With O functionalities (O1s)'),
+                                            'Polymer (C1s)':
+                                                ('Polymer', 'C1s — typical organic polymer'),
+                                            'Graphitic carbon (C1s)':
+                                                ('Polymer', 'Graphitic carbon (C1s)'),
+                                            'Fluorinated (F1s)':
+                                                ('Other (region only)', 'F1s (fluorinated)'),
+                                            'Nitrogen-containing (N1s)':
+                                                ('Other (region only)', 'N1s (nitrogen-containing)'),
+                                        }
+                                        mapped = flat_to_hierarchy.get(clean_name)
+                                        if mapped:
+                                            st.session_state['exp_family'] = mapped[0]
+                                            st.session_state['exp_material'] = mapped[1]
+                                            st.session_state['exp_template_applied'] = (
+                                                f"{mapped[0]} / {mapped[1]}"
+                                            )
+                                        else:
+                                            st.session_state['exp_template_applied'] = clean_name
                                         st.rerun()
 
     # 적용된 템플릿 표시
@@ -912,47 +940,99 @@ with tab_expert:
                   "— 아래에서 컴포넌트를 미세조정 후 피팅하세요.")
 
     # ===========================================================
-    # 재료 템플릿 선택 + 편집 (기존 + session_state 연결)
     # ===========================================================
-    col_t1, col_t2 = st.columns([2, 3])
+    # 재료 템플릿 선택 + 편집 (2단계 계층 dropdown)
+    # ===========================================================
+    st.markdown("#### 📚 재료 라이브러리")
+    st.caption(
+        "재료군을 먼저 선택하고, 그 안의 구체 재료를 선택하세요. "
+        "선택된 재료의 표준 컴포넌트가 자동으로 제안됩니다."
+    )
+
+    # 자동 제안에서 적용된 (family, material) 가져오기
+    applied_family = st.session_state.get('exp_family')
+    applied_material = st.session_state.get('exp_material')
+
+    # session_state 적용 → region_detected 기반 default 결정
+    families = get_hierarchy_families()
+
+    # default family 결정
+    default_family_idx = 0
+    if applied_family and applied_family in families:
+        default_family_idx = families.index(applied_family)
+    elif region_detected and region_detected != 'unknown':
+        # region에 매칭되는 family 우선
+        for i, fam in enumerate(families):
+            fam_data = MATERIAL_HIERARCHY[fam]
+            # family region 또는 하위 material region 중 하나라도 매칭
+            if fam_data.get('region') == region_detected:
+                default_family_idx = i
+                break
+
+    col_t1, col_t2 = st.columns(2)
     with col_t1:
-        filtered = {k: v for k, v in MATERIAL_TEMPLATES.items()
-                     if v['region'] == region_detected}
-        if not filtered:
-            filtered = MATERIAL_TEMPLATES
-        # session_state에 자동 제안으로 적용된 게 있으면 default로 사용
-        default_idx = 0
-        applied = st.session_state.get('exp_template')
-        if applied and applied in filtered:
-            default_idx = list(filtered.keys()).index(applied)
-        template_name = st.selectbox(
-            "재료 템플릿", options=list(filtered.keys()),
-            index=default_idx, key='exp_template_select'
+        selected_family = st.selectbox(
+            "1️⃣ 재료군",
+            options=families,
+            index=default_family_idx,
+            key='exp_family_select',
+            help="크게 어떤 종류의 재료인가요?"
         )
     with col_t2:
-        tmpl = MATERIAL_TEMPLATES[template_name]
-        st.info(f"**{tmpl['description']}**  \n참조: *{tmpl['reference']}*")
+        materials = get_hierarchy_materials(selected_family)
+        # default material 결정
+        default_mat_idx = 0
+        if (applied_family == selected_family and
+                applied_material and applied_material in materials):
+            default_mat_idx = materials.index(applied_material)
+        selected_material = st.selectbox(
+            "2️⃣ 구체 재료",
+            options=materials,
+            index=default_mat_idx,
+            key='exp_material_select',
+            help=f"{selected_family} 그룹의 어떤 재료인가요?"
+        )
 
+    # 선택된 템플릿 가져오기
+    tmpl = get_hierarchy_template(selected_family, selected_material)
+
+    # region 미스매치 경고
+    tmpl_region = tmpl['region']
+    if region_detected and region_detected != 'unknown' and tmpl_region != region_detected:
+        st.warning(
+            f"⚠️ 선택한 재료는 **{tmpl_region}** region용인데, "
+            f"업로드된 데이터는 **{region_detected}** region입니다. "
+            f"region이 맞는 재료를 선택하시거나, 데이터가 의도한 영역인지 확인해주세요."
+        )
+
+    st.info(f"**{tmpl['description']}**  \n참조: *{tmpl['reference']}*  \n"
+            f"기본 컴포넌트 {len(tmpl['components'])}개" +
+            (f" + 옵션 {len(tmpl.get('optional_components', []))}개"
+             if tmpl.get('optional_components') else ""))
+
+    # 옵션 컴포넌트
     selected_optional = []
     if tmpl.get('optional_components'):
-        st.markdown("**옵션 컴포넌트**")
+        st.markdown("**옵션 컴포넌트** (체크 시 추가됨)")
         for opt in tmpl['optional_components']:
-            key = f"opt_{template_name}_{opt['name']}"
+            opt_key = f"opt_{selected_family}_{selected_material}_{opt['name']}"
             checked = st.checkbox(
                 f"{opt['name']} ({opt['be']} eV) — {opt.get('hint', '')}",
-                key=key
+                key=opt_key
             )
             if checked:
                 selected_optional.append(opt['name'])
 
-    base_comps = components_from_template(template_name, selected_optional)
+    # 컴포넌트 생성 (계층 함수 사용)
+    base_comps = hierarchy_components(selected_family, selected_material,
+                                         include_optional=selected_optional)
 
     st.markdown("#### 컴포넌트 상세 설정")
     edited_comps = []
     for i, c in enumerate(base_comps):
         with st.expander(f"**{c.name}** @ {c.be} eV", expanded=False):
             cc1, cc2, cc3 = st.columns(3)
-            ukey = f"{template_name}_{c.name}_{i}"
+            ukey = f"{selected_family}_{selected_material}_{c.name}_{i}"
             with cc1:
                 be_center = st.number_input(
                     "BE 중심 (eV)", value=float(c.be), step=0.05, format="%.2f",
