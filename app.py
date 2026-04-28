@@ -32,6 +32,22 @@ from xps_multimatch import (
     auto_match_templates, TemplateMatchResult, get_compatible_templates,
 )
 
+# Analytics (익명 사용 통계 — 실패해도 앱 정상 작동)
+try:
+    from xps_analytics import (
+        track_app_opened, track_data_uploaded,
+        track_fitting_completed, track_result_downloaded, track_error,
+    )
+    _ANALYTICS_OK = True
+except Exception:
+    _ANALYTICS_OK = False
+    # No-op fallback
+    def track_app_opened(*a, **kw): pass
+    def track_data_uploaded(*a, **kw): pass
+    def track_fitting_completed(*a, **kw): pass
+    def track_result_downloaded(*a, **kw): pass
+    def track_error(*a, **kw): pass
+
 st.set_page_config(
     page_title="XPS AutoFit",
     page_icon="📊",
@@ -149,7 +165,9 @@ def plot_narrow_result(result, meta, container, mode_label=None):
     dl1.download_button("📋 파라미터 CSV", data=csv_buf.getvalue(),
                          file_name=f"{meta['source_file']}_params.csv",
                          mime='text/csv', use_container_width=True,
-                         key=f"dl_params_{mode_label}_{meta.get('source_file','')}")
+                         key=f"dl_params_{mode_label}_{meta.get('source_file','')}",
+                         on_click=track_result_downloaded,
+                         args=('csv_params', mode_label or 'unknown'))
 
     be_desc = be_p[::-1]
     curves_dict = {
@@ -165,14 +183,18 @@ def plot_narrow_result(result, meta, container, mode_label=None):
     dl2.download_button("📊 피팅 곡선 CSV", data=curves_buf.getvalue(),
                          file_name=f"{meta['source_file']}_curves.csv",
                          mime='text/csv', use_container_width=True,
-                         key=f"dl_curves_{mode_label}_{meta.get('source_file','')}")
+                         key=f"dl_curves_{mode_label}_{meta.get('source_file','')}",
+                         on_click=track_result_downloaded,
+                         args=('csv_curves', mode_label or 'unknown'))
 
     png_buf = io.BytesIO()
     fig.savefig(png_buf, format='png', dpi=180, bbox_inches='tight')
     dl3.download_button("🖼️ 플롯 PNG", data=png_buf.getvalue(),
                          file_name=f"{meta['source_file']}_fit.png",
                          mime='image/png', use_container_width=True,
-                         key=f"dl_png_{mode_label}_{meta.get('source_file','')}")
+                         key=f"dl_png_{mode_label}_{meta.get('source_file','')}",
+                         on_click=track_result_downloaded,
+                         args=('png', mode_label or 'unknown'))
 
 
 # =========================================================================
@@ -323,7 +345,9 @@ def plot_survey_result(result, meta, container, key_prefix='survey'):
     dl1.download_button("🧪 식별 원소 CSV", data=csv_buf.getvalue(),
                          file_name=f"{meta['source_file']}_elements.csv",
                          mime='text/csv', use_container_width=True,
-                         key=f'dl_survey_elem_{key_prefix}_{meta.get("source_file","")}')
+                         key=f'dl_survey_elem_{key_prefix}_{meta.get("source_file","")}',
+                         on_click=track_result_downloaded,
+                         args=('survey_elements_csv', 'survey'))
 
     if quant:
         df_q_export = pd.DataFrame([{
@@ -339,14 +363,18 @@ def plot_survey_result(result, meta, container, key_prefix='survey'):
         dl2.download_button("📊 정량 CSV", data=csv_q_buf.getvalue(),
                              file_name=f"{meta['source_file']}_quantification.csv",
                              mime='text/csv', use_container_width=True,
-                             key=f'dl_survey_quant_{key_prefix}_{meta.get("source_file","")}')
+                             key=f'dl_survey_quant_{key_prefix}_{meta.get("source_file","")}',
+                             on_click=track_result_downloaded,
+                             args=('survey_quant_csv', 'survey'))
 
     png_buf = io.BytesIO()
     fig.savefig(png_buf, format='png', dpi=180, bbox_inches='tight')
     dl3.download_button("🖼️ 플롯 PNG", data=png_buf.getvalue(),
                          file_name=f"{meta['source_file']}_survey.png",
                          mime='image/png', use_container_width=True,
-                         key=f'dl_survey_png_{key_prefix}_{meta.get("source_file","")}')
+                         key=f'dl_survey_png_{key_prefix}_{meta.get("source_file","")}',
+                         on_click=track_result_downloaded,
+                         args=('survey_png', 'survey'))
 
 
 # =========================================================================
@@ -354,6 +382,9 @@ def plot_survey_result(result, meta, container, key_prefix='survey'):
 # =========================================================================
 st.title("📊 XPS AutoFit")
 st.caption("자동 XPS 피팅 · v0.5 · Survey scan 자동 분석 추가")
+
+# 익명 방문 통계 (세션당 1회)
+track_app_opened()
 
 
 # =========================================================================
@@ -580,8 +611,17 @@ try:
         text = raw_bytes.decode('utf-8-sig', errors='replace')
         be, counts, meta = load_xps_csv(text, source_name=uploaded.name)
 except Exception as e:
+    track_error('data_load_failed', where='upload', details=str(e))
     st.error(f"데이터 로딩 실패: {e}")
     st.stop()
+
+# 익명 통계: 데이터 업로드 성공
+_file_ext = uploaded.name.lower().split('.')[-1] if '.' in uploaded.name else 'unknown'
+track_data_uploaded(
+    file_type=_file_ext,
+    file_size=len(be),
+    region=meta.get('region', 'unknown'),
+)
 
 if apply_cal and cal_shift != 0:
     be = calibrate_shift(be, cal_shift)
@@ -631,8 +671,17 @@ with tab_auto:
             result = analyze_survey(be, counts)
 
         if not result['success']:
+            track_error('survey_failed', where='auto_survey',
+                          details=str(result.get('reason', ''))[:100])
             st.error(f"분석 실패: {result['reason']}")
         else:
+            track_fitting_completed(
+                mode='survey',
+                region='survey',
+                r_squared=0,  # Survey는 R² 없음
+                n_components=len(result.get('matches', [])),
+                file_type=_file_ext,
+            )
             plot_survey_result(result, meta, st, key_prefix='auto')
 
     else:
@@ -721,8 +770,17 @@ with tab_auto:
                 }
 
         if not result['success']:
+            track_error('fit_failed', where='auto_narrow',
+                          details=str(result.get('reason', ''))[:100])
             st.error(f"피팅 실패: {result['reason']}")
         else:
+            track_fitting_completed(
+                mode='auto',
+                region=meta.get('region', 'unknown'),
+                r_squared=result.get('r_squared', 0),
+                n_components=result.get('n_peaks', 0),
+                file_type=_file_ext,
+            )
             mode_info = (f"{result['n_peaks']}개 " +
                           ('상태(doublet)' if result['mode'] == 'doublet' else '피크'))
             mc1, mc2, mc3, mc4 = st.columns(4)
@@ -993,8 +1051,17 @@ with tab_expert:
                 bg_kwargs=bg_kwargs,
             )
         if not exp_result['success']:
+            track_error('expert_fit_failed', where='expert',
+                          details=str(exp_result.get('reason', ''))[:100])
             st.error(f"피팅 실패: {exp_result['reason']}")
         else:
+            track_fitting_completed(
+                mode='expert',
+                region=meta.get('region', 'unknown'),
+                r_squared=exp_result.get('r_squared', 0),
+                n_components=exp_result.get('n_components', 0),
+                file_type=_file_ext,
+            )
             em1, em2, em3, em4 = st.columns(4)
             em1.metric("컴포넌트 수", exp_result['n_components'])
             em2.metric("R²", f"{exp_result['r_squared']:.4f}")
