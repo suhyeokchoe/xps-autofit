@@ -373,7 +373,6 @@ with st.sidebar:
             "헤더가 없으면 첫 번째 시트의 처음 두 숫자 컬럼을 사용합니다."
         )
     )
-    st.caption("💡 Excel 다중 시트는 첫 번째 시트만 사용됩니다")
 
     st.divider()
     st.header("🎯 Calibration")
@@ -437,16 +436,16 @@ if uploaded is None:
         st.markdown("""
 **v0.5의 핵심: Survey scan 자동 분석**
 
-지금까지는 narrow scan만 다뤘는데, 이제 **survey scan**도 자동 처리합니다:
+이제 **survey scan**도 자동 처리합니다:
 - **자동 모드**: 데이터 BE 범위가 500 eV 이상이면 자동으로 Survey 분석으로 분기
 - **별도 Survey 탭**: 명시적으로 Survey 분석을 원할 때
 
 **Survey 분석 기능**:
 1. 피크 자동 검출 (1차 미분 + prominence)
-2. **다중 라인 자기일관성 매칭** — 단일 피크 매칭의 가짜 양성 방지
-3. 충전(charging) 시프트 자동 처리
-4. 신뢰도 등급 (HIGH / MEDIUM / LOW)
-5. **근사 atomic %** 정량 (Scofield RSF 기반)
+2. 다중 라인 자기일관성 매칭 — 단일 피크 매칭의 가짜 양성 방지
+3. charging 시프트 자동 처리
+4. 신뢰도 등급 (HIGH / MEDIUM / LOW) 추가
+5. 근사 atomic % 정량 (Scofield RSF 기반)
 
 지원 원소: Li, B, C, N, O, F, Na, Mg, Al, Si, P, S, Cl, K, Ca,
 Ti, Cr, Mn, Fe, Co, Ni, Cu, Zn, Ga, As, Mo, Ag, In, Sn, Hf, Ta, W, Pt, Au
@@ -539,9 +538,8 @@ try:
                 expanded=False
             ):
                 st.caption(
-                    "Excel 파일에 여러 데이터 컬럼이 있습니다 (예: raw counts, "
-                    "envelope, 컴포넌트, residual 등). 자동으로는 **Binding Energy "
-                    "다음의 첫 번째 컬럼**을 raw counts로 가정합니다. 다르면 수동 지정하세요."
+                    "이 시트 안에 여러개의 데이터 컬럼이 있습니다 (예: raw counts, envelope, 컴포넌트, residual 등). "
+                    "\n\n\n자동으로는 **Binding Energy 다음의 첫 번째 컬럼**을 raw counts로 가정합니다.\n\n\n 다르면 수동 지정해주세요."
                 )
 
                 col_options = [c['index'] for c in avail_cols]
