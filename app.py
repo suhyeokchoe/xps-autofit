@@ -53,7 +53,6 @@ st.set_page_config(
         - License: MIT
 
         **참고 문헌**
-        - CasaXPS Cookbook (Casa Software Ltd, 2019)
         - Shirley, D. A. (1972). *Phys. Rev. B*, 5(12), 4709
         - Akaike, H. (1974). *IEEE Trans. Auto. Control*, 19(6), 716
         - NIST X-ray Photoelectron Spectroscopy Database
@@ -367,7 +366,7 @@ with st.sidebar:
         type=['csv', 'txt', 'xlsx', 'xls'],
         help=(
             "**지원 형식**:\n"
-            "- CSV / TXT: CasaXPS export 또는 2열(BE, Counts)\n"
+            "- CSV / TXT: 2열(BE, Counts)\n"
             "- Excel: .xlsx 및 .xls 모두 지원\n\n"
             "**Excel 자동 감지**: 'Binding Energy' / 'Counts' 헤더가 있으면 자동 인식. "
             "헤더가 없으면 첫 번째 시트의 처음 두 숫자 컬럼을 사용합니다."
@@ -396,7 +395,7 @@ with st.sidebar:
     st.header("📐 Background Anchor")
     st.caption(
         "Shirley BG의 시작/끝 위치를 결정합니다. "
-        "복잡한 데이터는 자동 감지가 부정확할 수 있어요."
+        "복잡한 데이터는 자동 감지가 부정확할 수 있습니다."
     )
     bg_mode = st.radio(
         "BG 영역 결정 방식",
@@ -959,7 +958,6 @@ with tab_expert:
                 "**η 의미**: pseudo-Voigt에서 η=0이면 순수 Gaussian, η=1이면 순수 Lorentzian, "
                 "그 사이는 혼합 비율입니다. 같은 측정 장비/조건에서는 η가 거의 일정합니다.\n\n"
                 "**언제 사용**: 같은 측정 조건의 동일 재료라면 거의 항상 켜는 것이 안전합니다. "
-                "**CasaXPS의 표준 관행**과 일치하는 설정입니다.\n\n"
                 "**효과**: 자유 파라미터 추가로 줄임. 결과가 화학적으로 더 안정됩니다."
             )
         )
