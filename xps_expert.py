@@ -406,14 +406,16 @@ MATERIAL_HIERARCHY = {
         'region': 'mixed',
         'description': '같은 원소의 여러 산화수가 공존 (페로브스카이트, 배터리, 촉매 등)',
         'materials': {
-            'Tin Perovskite (Sn3d)': {
-                'description': '페로브스카이트의 Sn²⁺/Sn⁴⁺ 공존 — perovskite solar cells',
-                'reference': 'Nat. Commun. 15, 9435 (2024); Sn perovskite literature',
+            'Tin oxidation states (Sn3d)': {
+                'description': ('Sn²⁺/Sn⁴⁺ 공존 — perovskite solar cells, '
+                                'Li/Na-ion battery anodes, 표면 산화된 Sn 박막, '
+                                'SnO₂ 광촉매 등'),
+                'reference': 'Nat. Commun. 15, 9435 (2024); NIST XPS DB',
                 'region': 'Sn3d',
                 'components': [
                     # Sn²⁺ doublet — main + minor (spin-orbit 8.41 eV)
                     # be_tol=1.0: 충전(charging) 시프트 흡수용 (절연체 페로브스카이트는 ±1 eV 흔함)
-                    # fwhm 0.7~1.2: 페로브스카이트의 좁은 피크에 맞춤 (NIST + 논문 표준)
+                    # fwhm 0.7~1.2: 좁은 피크에 맞춤 (NIST + 논문 표준)
                     {'name': 'Sn²⁺ 3d₅/₂', 'be': 486.6, 'be_tol': 1.0, 'fwhm': (0.7, 1.2)},
                     {'name': 'Sn²⁺ 3d₃/₂', 'be': 495.0, 'be_tol': 1.0, 'fwhm': (0.7, 1.2)},
                     # Sn⁴⁺ doublet — main + minor (보통 약간 더 넓음)
@@ -421,11 +423,13 @@ MATERIAL_HIERARCHY = {
                     {'name': 'Sn⁴⁺ 3d₃/₂', 'be': 495.9, 'be_tol': 1.0, 'fwhm': (0.8, 1.5)},
                 ],
                 'note': ('Sn²⁺와 Sn⁴⁺의 BE 차이는 ~0.9 eV로 작음. '
-                         'be_tol=1.0은 페로브스카이트의 충전(charging) 시프트 흡수용. '
+                         'be_tol=1.0은 충전(charging) 시프트 흡수용. '
                          'FWHM 공유 + η 공유 권장.'),
             },
-            'Copper oxidation (Cu2p)': {
-                'description': 'Cu⁺/Cu²⁺ 공존 — 촉매, 전극 표면',
+            'Copper oxidation states (Cu2p)': {
+                'description': ('Cu⁺/Cu²⁺ 공존 — heterogeneous catalysts, '
+                                'electrocatalysis (CO₂RR/HER/OER), Cu corrosion, '
+                                'copper-based MOFs, photocatalysts 등'),
                 'reference': 'Biesinger Appl. Surf. Sci. (2017); NIST',
                 'region': 'Cu2p',
                 'components': [
@@ -442,8 +446,10 @@ MATERIAL_HIERARCHY = {
                 ],
                 'note': 'Cu²⁺는 satellite peak이 강해서 옵션 추가를 권장합니다.',
             },
-            'Iron oxidation (Fe2p)': {
-                'description': 'Fe²⁺/Fe³⁺ 공존 — Fe₃O₄, Fe₂O₃-FeO 혼합 등',
+            'Iron oxidation states (Fe2p)': {
+                'description': ('Fe²⁺/Fe³⁺ 공존 — Fe₃O₄ (magnetite), '
+                                'partially-oxidized FeO, Fe-MOFs, biological samples, '
+                                'corrosion 표면 등'),
                 'reference': 'Yamashita & Hayes (2008); Biesinger',
                 'region': 'Fe2p',
                 'components': [
@@ -460,8 +466,10 @@ MATERIAL_HIERARCHY = {
                 ],
                 'note': 'Fe도 satellite peak 강함. 분리 매우 어려운 케이스 — 결과 해석 주의.',
             },
-            'Titanium oxidation (Ti2p)': {
-                'description': 'Ti³⁺/Ti⁴⁺ 공존 — defective TiO₂, Ti suboxides',
+            'Titanium oxidation states (Ti2p)': {
+                'description': ('Ti³⁺/Ti⁴⁺ 공존 — defective TiO₂ (광촉매, ETL), '
+                                'Ti suboxides (TiO_{2-x}), reduced TiO₂ surfaces, '
+                                'Ti-based perovskites 등'),
                 'reference': 'NIST; Diebold Surf. Sci. Rep. (2003)',
                 'region': 'Ti2p',
                 'components': [
@@ -472,8 +480,10 @@ MATERIAL_HIERARCHY = {
                 ],
                 'note': 'Ti³⁺는 oxygen vacancy의 신호 — defective TiO₂에서 관찰',
             },
-            'Manganese oxidation (Mn2p)': {
-                'description': 'Mn²⁺/Mn³⁺/Mn⁴⁺ 공존 — battery cathodes (LMO, NMC)',
+            'Manganese oxidation states (Mn2p)': {
+                'description': ('Mn²⁺/Mn³⁺/Mn⁴⁺ 공존 — Li-ion battery cathodes '
+                                '(LMO, NMC, LiMn₂O₄), water-splitting catalysts, '
+                                'Mn oxide thin films (MnO/Mn₂O₃/MnO₂) 등'),
                 'reference': 'Biesinger Appl. Surf. Sci. (2011); battery literature',
                 'region': 'Mn2p',
                 'components': [
