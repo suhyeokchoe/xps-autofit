@@ -15,7 +15,7 @@ XPS(X-ray Photoelectron Spectroscopy) 데이터를 업로드하면 자동으로
 
 ## 🚀 Live Demo
 
-**👉 [https://xps-autofit-suhyeok.streamlit.app](https://xps-autofit-suhyeok.streamlit.app)**
+**👉 [https://xps-autofit.streamlit.app](https://xps-autofit.streamlit.app)**
 
 브라우저에서 즉시 사용 가능. 설치 불필요.
 
@@ -55,12 +55,10 @@ XPS(X-ray Photoelectron Spectroscopy) 데이터를 업로드하면 자동으로
 
 ## 📖 사용법
 
-1. 사이드바에서 **CSV 파일 업로드** (CasaXPS export 또는 2열 BE/Counts CSV)
+1. 사이드바에서 CSV 파일/Excel 파일 업로드
 2. **자동 모드** 또는 **Expert 모드** 선택
 3. (Expert 모드) 재료 템플릿 선택 → 컴포넌트 편집 → 제약 옵션 설정
 4. 피팅 실행 → 결과 확인 → CSV/PNG 다운로드
-
-> ⚠️ **`.xls` 파일은 Excel에서 `다른 이름으로 저장` → CSV로 변환 후 업로드하세요.**
 
 ---
 
@@ -99,7 +97,6 @@ XPS(X-ray Photoelectron Spectroscopy) 데이터를 업로드하면 자동으로
 
 ## 📚 References
 
-- CasaXPS Cookbook (Casa Software Ltd, 2019)
 - Shirley, D. A. (1972). High-resolution X-ray photoemission spectrum of the valence bands of gold. *Phys. Rev. B*, 5(12), 4709.
 - Akaike, H. (1974). A new look at the statistical model identification. *IEEE Trans. Auto. Control*, 19(6), 716.
 - NIST X-ray Photoelectron Spectroscopy Database
