@@ -465,6 +465,30 @@ with st.sidebar:
 # =========================================================================
 if uploaded is None:
     st.info("👈 사이드바에서 XPS 데이터 파일을 업로드하세요.")
+    with st.expander("🆕 v0.5 업데이트 — Survey 자동 분석", expanded=True):
+        st.markdown("""
+**v0.5의 핵심: Survey scan 자동 분석**
+
+이제 **survey scan**도 자동 처리합니다:
+- **자동 모드**: 데이터 BE 범위가 500 eV 이상이면 자동으로 Survey 분석으로 분기
+- **별도 Survey 탭**: 명시적으로 Survey 분석을 원할 때
+
+**Survey 분석 기능**:
+1. 피크 자동 검출 (1차 미분 + prominence)
+2. 다중 라인 자기일관성 매칭 — 단일 피크 매칭의 가짜 양성 방지
+3. charging 시프트 자동 처리
+4. 신뢰도 등급 (HIGH / MEDIUM / LOW) 추가
+5. 근사 atomic % 정량 (Scofield RSF 기반)
+
+지원 원소: Li, B, C, N, O, F, Na, Mg, Al, Si, P, S, Cl, K, Ca,
+Ti, Cr, Mn, Fe, Co, Ni, Cu, Zn, Ga, As, Mo, Ag, In, Sn, Hf, Ta, W, Pt, Au
+        """)
+    with st.expander("🔬 v0.4 — Expert 모드 (Narrow)"):
+        st.markdown("""
+- 재료 템플릿 기반 제약 피팅
+- 위치 고정 / FWHM 공유 / η 공유 옵션
+- 정직한 결과 (데이터가 지지하지 않는 컴포넌트는 면적 작게)
+        """)
     st.stop()
 
 
@@ -675,14 +699,16 @@ if not auto_is_survey:
             # ---- Narrow 자동 모드 (v0.7 단순 방식) ----
             st.markdown("AIC 기반 자동 피크 개수 선택 + singlet/doublet 자동 분기")
 
-            col_a, col_b, col_c = st.columns(3)
+            col_a, col_b = st.columns(2)
             with col_a:
                 all_regions = ['auto'] + list(ELEMENT_PRIORS.keys()) + list(DOUBLET_PRIORS.keys())
                 region_override = st.selectbox("Region", all_regions, index=0)
             with col_b:
-                max_peaks = st.slider("최대 탐색 피크 수", 1, 6, 3)
-            with col_c:
-                manual_n = st.number_input("수동 지정 (0=자동)", 0, 6, 0)
+                manual_n = st.number_input(
+                    "수동 지정 (0=자동)", 0, 6, 0,
+                    help="0이면 AIC가 자동으로 피크/상태 수를 결정. "
+                         "양수를 지정하면 그 개수로 강제 피팅."
+                )
 
             force_singlet = st.checkbox("Doublet 강제 해제 (singlet만)", value=False)
 
@@ -695,7 +721,6 @@ if not auto_is_survey:
             with st.spinner("피팅 중..."):
                 if manual_n == 0:
                     result = auto_fit_v3(be, counts, eff_meta,
-                                           max_peaks=max_peaks,
                                            bg_kwargs=bg_kwargs)
                 else:
                     bg = shirley_background(be, counts, **bg_kwargs)

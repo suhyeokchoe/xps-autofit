@@ -929,12 +929,17 @@ def fit_n_doublets(x, y_corr, n_states, init_centers_main, region):
 # -------------------------------------------------------------------
 # 자동 파이프라인 (singlet/doublet 자동 분기)
 # -------------------------------------------------------------------
-def auto_fit_v3(be, counts, meta=None, max_peaks=4, bg_kwargs=None):
+def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
     """
     자동 피팅. BE 범위가 500 eV 이상이면 자동으로 Survey 모드로 분기.
 
-    bg_kwargs: shirley_background()에 전달할 추가 옵션 dict
-               (예: {'auto_anchor': False} or {'anchor_left': 535, 'anchor_right': 528})
+    Parameters:
+        max_peaks: AIC 모델 비교에서 시도할 최대 피크/상태 수.
+                   None(기본)이면 검출된 피크 수에 따라 내부 자동 결정
+                   (max(detected+1, 4) 단, 8을 넘지 않음).
+                   외부에서 명시적으로 정수를 주면 그 값으로 상한 강제.
+        bg_kwargs: shirley_background()에 전달할 추가 옵션 dict
+                   (예: {'auto_anchor': False} or {'anchor_left': 535, 'anchor_right': 528})
     """
     bg_kwargs = bg_kwargs or {}
 
@@ -962,11 +967,20 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=4, bg_kwargs=None):
 
     init_centers = [float(be[i]) for i in peaks_idx]
 
+    # ---- max_peaks 결정 ----
+    # max_peaks=None: 검출된 피크 수 기반 자동 (UI에서 슬라이더 제거에 따른 디폴트)
+    # max_peaks=int : 외부 호출자가 명시적으로 상한 지정 (예: multimatch)
+    if max_peaks is None:
+        # 검출 피크보다 +1 여유 (shoulder 누락 보정), 4 미만으론 안 떨어지고 8 초과 안 함
+        effective_max_peaks = min(max(len(init_centers) + 1, 4), 8)
+    else:
+        effective_max_peaks = max_peaks
+
     trials = []
 
     if is_doublet(region):
         # Doublet 우선 시도
-        max_states = max(1, min(max_peaks, max(1, len(init_centers) // 2 + 1)))
+        max_states = max(1, min(effective_max_peaks, max(1, len(init_centers) // 2 + 1)))
         sorted_by_be = sorted(init_centers)
         # main 후보: 모든 감지 피크 (fit_n_doublets가 알아서 상위 n개 사용)
         for n in range(1, max_states + 1):
@@ -979,7 +993,7 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=4, bg_kwargs=None):
 
         # Doublet이 안 맞으면 singlet fallback
         if not trials or (trials and min(t['r2'] for t in trials) < 0.9):
-            for n in range(1, min(max_peaks, len(init_centers)) + 1):
+            for n in range(1, min(effective_max_peaks, len(init_centers)) + 1):
                 ranked = sorted(init_centers,
                                 key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
                 centers = sorted(ranked[:n])
@@ -987,7 +1001,7 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=4, bg_kwargs=None):
                 if r is not None: trials.append(r)
     else:
         # Singlet only
-        max_try = min(max_peaks, len(init_centers))
+        max_try = min(effective_max_peaks, len(init_centers))
         max_try = max(max_try, 1)
         for n in range(1, max_try + 1):
             ranked = sorted(init_centers,
