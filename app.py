@@ -141,7 +141,7 @@ def plot_narrow_result(result, meta, container, mode_label=None):
     container.pyplot(fig)
 
     # 테이블
-    container.subheader("🔢 컴포넌트 파라미터")
+    container.subheader("컴포넌트 파라미터")
     rows = []
     for c in result['components']:
         label = c.get('name', c.get('label', ''))
