@@ -53,7 +53,7 @@ MATERIAL_TEMPLATES = {
         'components': [
             {'name': 'M-O (lattice oxygen)',  'be': 530.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
             {'name': 'O-H (hydroxyl / defect)', 'be': 531.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.2)},
-            {'name': 'C=O / adsorbed water', 'be': 532.5, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
+            {'name': 'Adsorbed water / surface contamination', 'be': 532.5, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
         ],
         'optional_components': [
             {'name': 'S=O (sulfonate group)', 'be': 531.6, 'be_tol': 0.3, 'fwhm': (1.0, 1.8),
@@ -275,17 +275,40 @@ MATERIAL_HIERARCHY = {
                 ],
             },
             'Generic (other oxides)': {
-                'description': '위에 없는 일반 금속 산화물',
+                'description': '위에 없는 일반 단일 금속 산화물',
                 'reference': 'NIST XPS DB (typical values)',
                 'components': [
                     {'name': 'M-O (lattice oxygen)', 'be': 530.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0)},
                     {'name': 'O-H / defect', 'be': 531.5, 'be_tol': 0.4, 'fwhm': (1.2, 2.2)},
-                    {'name': 'C=O / adsorbed water', 'be': 532.5, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
+                    {'name': 'Adsorbed water / contamination', 'be': 532.5, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
                 ],
                 'optional_components': [
                     {'name': 'OV (Oxygen Vacancy)', 'be': 531.2, 'be_tol': 0.5, 'fwhm': (1.0, 2.2),
                      'hint': '재료별로 위치 다름 — 일반적 추정값'},
+                    {'name': 'C=O (carbonate / surface contamination)', 'be': 533.0, 'be_tol': 0.5, 'fwhm': (1.0, 2.0),
+                     'hint': '예: 표면 carbonate (CO₃²⁻), 유기 오염물 등 — 무기 샘플엔 보통 무관'},
                 ],
+            },
+            'Mixed oxide (binary, e.g. Al2O3-SnO2, ITO)': {
+                'description': ('두 금속 산화물이 혼재된 박막 또는 분말 — '
+                                'Al₂O₃-SnO₂, ITO (In₂O₃-SnO₂), TiO₂-SnO₂, '
+                                'core-shell 산화물 등'),
+                'reference': 'NIST + 분야별 표준값',
+                'components': [
+                    # 두 metal-O lattice 환경 — 위치는 사용자가 자기 재료에 맞게 조정 권장
+                    {'name': 'M1-O lattice (lower BE metal)', 'be': 530.0, 'be_tol': 0.7, 'fwhm': (1.0, 2.0)},
+                    {'name': 'M2-O lattice (higher BE metal)', 'be': 531.0, 'be_tol': 0.7, 'fwhm': (1.0, 2.0)},
+                    {'name': 'O-H / defect', 'be': 531.8, 'be_tol': 0.4, 'fwhm': (1.2, 2.2)},
+                    {'name': 'Adsorbed water / contamination', 'be': 532.8, 'be_tol': 0.5, 'fwhm': (1.3, 2.5)},
+                ],
+                'optional_components': [
+                    {'name': 'OV (Oxygen Vacancy)', 'be': 531.3, 'be_tol': 0.5, 'fwhm': (1.0, 2.2),
+                     'hint': '결함 산화물 또는 환원 표면에서 관찰'},
+                ],
+                'note': ('두 metal-O lattice의 BE는 각 재료마다 다릅니다. '
+                          '예: Al₂O₃ ~531, SnO₂ ~530.6, In₂O₃ ~530.0. '
+                          '본인 재료에 맞춰 BE 중심을 직접 조정하세요. '
+                          'M1=낮은 BE, M2=높은 BE로 자동 정렬됩니다.'),
             },
         },
     },
@@ -297,7 +320,7 @@ MATERIAL_HIERARCHY = {
         'region': 'O1s',
         'description': '금속-유기 골격체 (Metal-Organic Framework)',
         'materials': {
-            'Zr-based (UiO-66/67, MOF-801/867)': {
+            'Zr-based': {
                 'description': 'Zr-oxo cluster + carboxylate linker',
                 'reference': 'Nat. Commun. 16, 162 (2025); Wang et al. JMCA 2017',
                 'components': [
