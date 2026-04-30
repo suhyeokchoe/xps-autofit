@@ -138,6 +138,92 @@ def is_multi_ox(region):
 
 
 # ===================================================================
+# SATELLITE_PRIORS — shake-up satellite 정보
+# ===================================================================
+# 강상관 시스템(Cu²⁺, Fe³⁺, Ni²⁺, Co²⁺, Mn²⁺ 등)에서 main peak로부터 일정
+# 거리에 나타나는 위성 피크. main peak fit 시 mandatory로 포함시켜야 함.
+#
+# 구조:
+#   region: {
+#       'state_name': {
+#           'be_offset_main':  satellite_main - main_peak_main (eV)
+#           'be_offset_minor': satellite_minor - main_peak_minor (eV)
+#           'amp_ratio': satellite/main 진폭 비율 (대략값, fit 자유 변수)
+#           'fwhm_factor': satellite FWHM = main_FWHM × factor
+#       }
+#   }
+#
+# Reference: NIST XPS DB notes, Biesinger et al. (2010, 2011)
+# ===================================================================
+
+SATELLITE_PRIORS = {
+    'Cu2p': {
+        'Cu2+': {
+            'be_offset_main':  9.0,   # 932.5 + 9 = ~941.5 (Cu²⁺ 2p₃/₂ sat)
+            'be_offset_minor': 9.0,   # 952.5 + 9 = ~961.5 (Cu²⁺ 2p₁/₂ sat)
+            'amp_ratio_init': 0.5,    # 초기값, fit이 조정
+            'amp_ratio_bounds': (0.2, 1.0),  # Cu²⁺는 main의 30~80%
+            'fwhm_factor': 2.5,       # satellite는 일반적으로 main보다 넓음
+            'description': 'Cu²⁺ 2p shake-up satellite (CuO/Cu(OH)₂ 표지)',
+        },
+    },
+    'Fe2p': {
+        'Fe3+': {
+            'be_offset_main':  8.0,
+            'be_offset_minor': 8.0,
+            'amp_ratio_init': 0.3,
+            'amp_ratio_bounds': (0.1, 0.7),
+            'fwhm_factor': 2.0,
+            'description': 'Fe³⁺ shake-up satellite (Fe₂O₃, FeOOH)',
+        },
+        'Fe2+': {
+            'be_offset_main':  6.0,
+            'be_offset_minor': 6.0,
+            'amp_ratio_init': 0.2,
+            'amp_ratio_bounds': (0.05, 0.5),
+            'fwhm_factor': 2.0,
+            'description': 'Fe²⁺ shake-up satellite (FeO)',
+        },
+    },
+    'Ni2p': {
+        'Ni2+': {
+            'be_offset_main':  6.0,
+            'be_offset_minor': 6.0,
+            'amp_ratio_init': 0.4,
+            'amp_ratio_bounds': (0.2, 0.8),
+            'fwhm_factor': 2.0,
+            'description': 'Ni²⁺ shake-up satellite (NiO, Ni(OH)₂)',
+        },
+    },
+    'Co2p': {
+        'Co2+': {
+            'be_offset_main':  5.5,
+            'be_offset_minor': 5.5,
+            'amp_ratio_init': 0.4,
+            'amp_ratio_bounds': (0.2, 0.8),
+            'fwhm_factor': 2.0,
+            'description': 'Co²⁺ shake-up satellite (CoO)',
+        },
+    },
+    'Mn2p': {
+        'Mn2+': {
+            'be_offset_main':  5.0,
+            'be_offset_minor': 5.0,
+            'amp_ratio_init': 0.2,
+            'amp_ratio_bounds': (0.05, 0.5),
+            'fwhm_factor': 2.0,
+            'description': 'Mn²⁺ shake-up satellite (MnO)',
+        },
+    },
+}
+
+
+def has_satellite(region):
+    """region이 강한 satellite를 가지는가"""
+    return region in SATELLITE_PRIORS
+
+
+# ===================================================================
 # Auto-labeling helper — 자동 모드 결과에 화학적 라벨 부여
 # ===================================================================
 def label_components_by_oxidation(components, region, n_doublets=None):
@@ -786,13 +872,149 @@ def _detect_anchor_indices(x, y, window_eV=1.5, threshold_ratio=0.08):
 
 
 # -------------------------------------------------------------------
-# Pseudo-Voigt
+# Linear background
+# -------------------------------------------------------------------
+def linear_background(x, y, anchor_left=None, anchor_right=None,
+                       auto_anchor=True):
+    """
+    선형 background. 양 끝 anchor 두 점을 잇는 직선.
+
+    Cu2p, Fe2p, Mn2p, Co2p, Ni2p 같이 강한 shake-up satellite를 가진
+    region에서는 Shirley가 satellite 신호를 BG continuum으로 흡수해
+    문제가 생김. Linear는 satellite 영역을 침범하지 않아 안전.
+
+    Reference: CasaXPS Manual, "Backgrounds for satellite-rich spectra".
+    """
+    n = len(y)
+    if anchor_left is not None:
+        left_idx = int(np.argmin(np.abs(x - anchor_left)))
+    elif auto_anchor:
+        left_idx, _ = _detect_anchor_indices(x, y)
+    else:
+        left_idx = 0
+
+    if anchor_right is not None:
+        right_idx = int(np.argmin(np.abs(x - anchor_right)))
+    elif auto_anchor:
+        _, right_idx = _detect_anchor_indices(x, y)
+    else:
+        right_idx = n - 1
+
+    if left_idx > right_idx:
+        left_idx, right_idx = right_idx, left_idx
+    if right_idx - left_idx < 2:
+        # fallback: 양 끝점
+        left_idx, right_idx = 0, n - 1
+
+    # 양 anchor 작은 윈도우 평균 (노이즈 완화)
+    win = max(1, min(5, (right_idx - left_idx) // 20))
+    y_left = float(np.mean(y[max(0, left_idx-win):left_idx+win+1]))
+    y_right = float(np.mean(y[max(0, right_idx-win):right_idx+win+1]))
+
+    bg = np.zeros_like(y, dtype=float)
+    # Anchor 안쪽: 직선
+    if right_idx > left_idx:
+        x_seg = x[left_idx:right_idx+1]
+        slope = (y_right - y_left) / (x_seg[-1] - x_seg[0]) if x_seg[-1] != x_seg[0] else 0.0
+        bg[left_idx:right_idx+1] = y_left + slope * (x_seg - x_seg[0])
+    # Anchor 바깥: raw data를 따라감 (Shirley와 동일 정책)
+    bg[:left_idx] = y[:left_idx]
+    bg[right_idx+1:] = y[right_idx+1:]
+    return bg
+
+
+# -------------------------------------------------------------------
+# Region별 권장 BG 정책
+# -------------------------------------------------------------------
+# Linear BG가 권장되는 region (강한 satellite 또는 multiplet splitting)
+# Reference: CasaXPS Manual, NIST XPS Database notes
+LINEAR_BG_REGIONS = {
+    'Cu2p',  # Cu²⁺ shake-up satellite
+    'Fe2p',  # Multiplet splitting + satellite
+    'Mn2p',  # Multiplet splitting
+    'Co2p',  # Multiplet splitting + satellite
+    'Ni2p',  # Multiplet splitting + satellite
+}
+
+
+def get_recommended_bg_type(region):
+    """region에 따라 권장 BG 타입 반환 ('shirley' or 'linear')."""
+    if region in LINEAR_BG_REGIONS:
+        return 'linear'
+    return 'shirley'
+
+
+def compute_background(x, y, bg_type='auto', region=None, **kwargs):
+    """
+    BG 계산 통합 dispatcher.
+
+    Parameters:
+        bg_type: 'shirley' / 'linear' / 'auto'
+                 'auto'면 region을 보고 자동 결정
+        region: 'Cu2p', 'O1s' 등. bg_type='auto'일 때 사용
+        **kwargs: shirley_background / linear_background에 전달
+                  (anchor_left, anchor_right, auto_anchor, max_iter, tol)
+
+    Returns:
+        bg: numpy array (y와 같은 길이)
+    """
+    if bg_type == 'auto':
+        bg_type = get_recommended_bg_type(region)
+
+    if bg_type == 'linear':
+        # linear는 max_iter/tol 무시
+        return linear_background(
+            x, y,
+            anchor_left=kwargs.get('anchor_left'),
+            anchor_right=kwargs.get('anchor_right'),
+            auto_anchor=kwargs.get('auto_anchor', True),
+        )
+    else:
+        return shirley_background(x, y, **kwargs)
+
+
+# -------------------------------------------------------------------
+# Pseudo-Voigt (대칭 + 비대칭)
 # -------------------------------------------------------------------
 def pseudo_voigt(x, amp, center, fwhm, eta):
+    """대칭 pseudo-Voigt. 기존 모든 호출과 호환."""
     sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
     gamma = fwhm / 2
     G = np.exp(-((x - center) ** 2) / (2 * sigma ** 2))
     L = 1.0 / (1.0 + ((x - center) / gamma) ** 2)
+    return amp * ((1 - eta) * G + eta * L)
+
+
+def asymmetric_pseudo_voigt(x, amp, center, fwhm, eta, alpha):
+    """
+    비대칭 pseudo-Voigt. α=0이면 대칭 PV와 동일.
+
+    저BE쪽(x < center)으로 꼬리가 늘어나는 형태.
+    XPS metallic peak (Cu, Fe, Ni 금속 등)의 conduction-band screening 비대칭성과
+    Cu²⁺ 같은 강상관 시스템 main peak에 적합.
+
+    α (alpha): 비대칭 정도 (0=대칭, 0.1~0.5 권장 범위)
+        FWHM_effective(x < center) = fwhm · (1 + α · (center - x))
+        FWHM_effective(x ≥ center) = fwhm  (변화 없음)
+
+    Reference: CasaXPS LA(α, β=1) 라인쉐입과 유사. Schmid et al. 2014.
+    """
+    if abs(alpha) < 1e-9:
+        # 빠른 경로: 대칭과 동일
+        return pseudo_voigt(x, amp, center, fwhm, eta)
+
+    x = np.asarray(x, dtype=float)
+    dx = x - center
+    # 저BE쪽(dx<0)만 fwhm 확장; 고BE쪽은 그대로
+    expand = np.where(dx < 0, 1.0 + alpha * (-dx), 1.0)
+    fwhm_local = fwhm * expand
+    # 안전: 음수/0 fwhm 방지
+    fwhm_local = np.maximum(fwhm_local, 1e-6)
+
+    sigma = fwhm_local / (2 * np.sqrt(2 * np.log(2)))
+    gamma = fwhm_local / 2
+    G = np.exp(-(dx ** 2) / (2 * sigma ** 2))
+    L = 1.0 / (1.0 + (dx / gamma) ** 2)
     return amp * ((1 - eta) * G + eta * L)
 
 
@@ -820,6 +1042,24 @@ def multi_doublet_pv(x, delta_BE, area_ratio, *params):
         amp_n = amp_m / area_ratio
         c_n = c_m + delta_BE
         y = y + pseudo_voigt(x, amp_n, c_n, fwhm, eta)
+    return y
+
+
+def multi_doublet_pv_asym(x, delta_BE, area_ratio, alpha, *params):
+    """
+    multi_doublet_pv의 비대칭 버전. 모든 main+minor pair가 같은 alpha 공유.
+    Cu/Fe/Ni/Co/Mn 같은 강상관 시스템의 main peak 비대칭성 표현.
+
+    params per state: [amp_main, center_main, fwhm_shared, eta_shared]
+    """
+    n_states = len(params) // 4
+    y = np.zeros_like(x, dtype=float)
+    for i in range(n_states):
+        amp_m, c_m, fwhm, eta = params[i*4:i*4+4]
+        y = y + asymmetric_pseudo_voigt(x, amp_m, c_m, fwhm, eta, alpha)
+        amp_n = amp_m / area_ratio
+        c_n = c_m + delta_BE
+        y = y + asymmetric_pseudo_voigt(x, amp_n, c_n, fwhm, eta, alpha)
     return y
 
 
@@ -894,7 +1134,15 @@ def fit_n_peaks(x, y_corr, n, init_centers, region=None):
 # -------------------------------------------------------------------
 # Doublet 피팅
 # -------------------------------------------------------------------
-def fit_n_doublets(x, y_corr, n_states, init_centers_main, region):
+def fit_n_doublets(x, y_corr, n_states, init_centers_main, region,
+                     use_asymmetric=False):
+    """
+    n개 doublet (spin-orbit pair) fit.
+
+    use_asymmetric=True: 비대칭 PV 사용 (Cu²⁺ main peak 같은 강상관 시스템).
+                         alpha 1개를 모든 state가 공유 (자유 파라미터, 0~0.5).
+                         자유도 +1 (AIC 패널티 +2).
+    """
     _, _, fwhm_min, fwhm_max, delta_BE, area_ratio = DOUBLET_PRIORS[region]
 
     p0, lo, hi = [], [], []
@@ -905,23 +1153,137 @@ def fit_n_doublets(x, y_corr, n_states, init_centers_main, region):
         lo += [amp0 * 0.05, c0 - 2.0, fwhm_min, 0.0]
         hi += [amp0 * 5.0,  c0 + 2.0, fwhm_max, 1.0]
 
-    def model(x_arr, *params):
-        return multi_doublet_pv(x_arr, delta_BE, area_ratio, *params)
+    if use_asymmetric:
+        # alpha를 맨 앞에 추가 (자유 파라미터)
+        p0 = [0.15] + p0
+        lo = [0.0] + lo
+        hi = [0.6] + hi
+
+        def model(x_arr, *params):
+            alpha = params[0]
+            state_params = params[1:]
+            return multi_doublet_pv_asym(x_arr, delta_BE, area_ratio, alpha, *state_params)
+        k_extra = 1
+    else:
+        def model(x_arr, *params):
+            return multi_doublet_pv(x_arr, delta_BE, area_ratio, *params)
+        k_extra = 0
 
     try:
         popt, _ = curve_fit(model, x, y_corr,
-                            p0=p0, bounds=(lo, hi), maxfev=15000)
+                            p0=p0, bounds=(lo, hi), maxfev=20000)
         y_fit = model(x, *popt)
         resid = y_corr - y_fit
         ss_res = float(np.sum(resid ** 2))
         ss_tot = float(np.sum((y_corr - np.mean(y_corr)) ** 2))
         r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
         rms = float(np.sqrt(ss_res / len(x)))
-        N = len(x); k = 4 * n_states  # 자유도: state당 4
+        N = len(x); k = 4 * n_states + k_extra
         aic = N * np.log(ss_res / N + 1e-20) + 2 * k
-        return {'popt': popt, 'y_fit': y_fit, 'r2': r2, 'rms': rms,
-                'aic': aic, 'n_peaks': n_states, 'mode': 'doublet',
-                'delta_BE': delta_BE, 'area_ratio': area_ratio}
+        result = {'popt': popt, 'y_fit': y_fit, 'r2': r2, 'rms': rms,
+                  'aic': aic, 'n_peaks': n_states,
+                  'mode': 'doublet_asym' if use_asymmetric else 'doublet',
+                  'delta_BE': delta_BE, 'area_ratio': area_ratio,
+                  'use_asymmetric': use_asymmetric}
+        if use_asymmetric:
+            result['alpha'] = float(popt[0])
+        return result
+    except Exception:
+        return None
+
+
+# -------------------------------------------------------------------
+# Satellite-aware doublet fit (Cu²⁺/Fe³⁺/Ni²⁺ 등)
+# -------------------------------------------------------------------
+def doublet_with_satellite_pv(x, delta_BE, area_ratio,
+                                sat_offset_main, sat_offset_minor, sat_fwhm_factor,
+                                amp_m, c_m, fwhm, eta, sat_amp):
+    """
+    단일 화학상태 doublet + 그 satellite pair.
+
+    파라미터 (총 5개):
+        amp_m   : main peak (2p₃/₂) 진폭
+        c_m     : main peak (2p₃/₂) 위치
+        fwhm    : main peak FWHM (satellite는 factor 곱)
+        eta     : Gauss/Lorentz 비율 (main, satellite 공유)
+        sat_amp : satellite_main 진폭
+
+    제약:
+        spin-orbit minor: c_m + delta_BE, amp_m / area_ratio  (대칭)
+        satellite main:  c_m + sat_offset_main,  amp = sat_amp,  fwhm × sat_fwhm_factor
+        satellite minor: c_m + delta_BE + sat_offset_minor,
+                         amp = sat_amp / area_ratio,  fwhm × sat_fwhm_factor
+    """
+    y = np.zeros_like(x, dtype=float)
+    sat_fwhm = fwhm * sat_fwhm_factor
+    # Main doublet (2p₃/₂ + 2p₁/₂)
+    y = y + pseudo_voigt(x, amp_m, c_m, fwhm, eta)
+    y = y + pseudo_voigt(x, amp_m / area_ratio, c_m + delta_BE, fwhm, eta)
+    # Satellite doublet (각각 main에서 offset만큼 떨어짐)
+    y = y + pseudo_voigt(x, sat_amp, c_m + sat_offset_main, sat_fwhm, eta)
+    y = y + pseudo_voigt(x, sat_amp / area_ratio,
+                          c_m + delta_BE + sat_offset_minor, sat_fwhm, eta)
+    return y
+
+
+def fit_doublet_with_satellite(x, y_corr, region, sat_state, init_center_main):
+    """
+    Single-state doublet + satellite fit.
+    Cu²⁺ 같이 satellite가 main과 동시에 항상 등장하는 시스템 전용.
+
+    Returns: fit dict (fit_n_doublets와 호환되는 형태) 또는 None
+    """
+    if region not in DOUBLET_PRIORS:
+        return None
+    if region not in SATELLITE_PRIORS or sat_state not in SATELLITE_PRIORS[region]:
+        return None
+
+    _, _, fwhm_min, fwhm_max, delta_BE, area_ratio = DOUBLET_PRIORS[region]
+    sat = SATELLITE_PRIORS[region][sat_state]
+    sat_offset_main = sat['be_offset_main']
+    sat_offset_minor = sat['be_offset_minor']
+    sat_fwhm_factor = sat['fwhm_factor']
+    sat_amp_init_ratio = sat['amp_ratio_init']
+    sat_amp_lo, sat_amp_hi = sat['amp_ratio_bounds']
+
+    c0 = init_center_main
+    idx0 = int(np.argmin(np.abs(x - c0)))
+    amp0 = max(y_corr[idx0], max(y_corr) * 0.1)
+    fwhm0 = np.mean([fwhm_min, fwhm_max])
+
+    # 초기값 / bounds: [amp_m, c_m, fwhm, eta, sat_amp]
+    p0 = [amp0, c0, fwhm0, 0.3, amp0 * sat_amp_init_ratio]
+    lo = [amp0 * 0.1, c0 - 2.0, fwhm_min, 0.0, amp0 * sat_amp_lo]
+    hi = [amp0 * 5.0, c0 + 2.0, fwhm_max, 1.0, amp0 * sat_amp_hi]
+
+    def model(x_arr, *params):
+        return doublet_with_satellite_pv(
+            x_arr, delta_BE, area_ratio,
+            sat_offset_main, sat_offset_minor, sat_fwhm_factor,
+            *params,
+        )
+
+    try:
+        popt, _ = curve_fit(model, x, y_corr,
+                            p0=p0, bounds=(lo, hi), maxfev=20000)
+        y_fit = model(x, *popt)
+        resid = y_corr - y_fit
+        ss_res = float(np.sum(resid ** 2))
+        ss_tot = float(np.sum((y_corr - np.mean(y_corr)) ** 2))
+        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+        rms = float(np.sqrt(ss_res / len(x)))
+        # 자유도 5: amp_m, c_m, fwhm, eta, sat_amp
+        N = len(x); k = 5
+        aic = N * np.log(ss_res / N + 1e-20) + 2 * k
+        return {
+            'popt': popt, 'y_fit': y_fit, 'r2': r2, 'rms': rms,
+            'aic': aic, 'n_peaks': 1, 'mode': 'doublet_with_satellite',
+            'delta_BE': delta_BE, 'area_ratio': area_ratio,
+            'sat_state': sat_state,
+            'sat_offset_main': sat_offset_main,
+            'sat_offset_minor': sat_offset_minor,
+            'sat_fwhm_factor': sat_fwhm_factor,
+        }
     except Exception:
         return None
 
@@ -938,8 +1300,13 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
                    None(기본)이면 검출된 피크 수에 따라 내부 자동 결정
                    (max(detected+1, 4) 단, 8을 넘지 않음).
                    외부에서 명시적으로 정수를 주면 그 값으로 상한 강제.
-        bg_kwargs: shirley_background()에 전달할 추가 옵션 dict
-                   (예: {'auto_anchor': False} or {'anchor_left': 535, 'anchor_right': 528})
+        bg_kwargs: BG 옵션 dict.
+                   - 'bg_type': 'auto'(기본) / 'shirley' / 'linear'
+                                'auto'면 region에 따라 자동 결정
+                                (Cu2p/Fe2p/Mn2p/Co2p/Ni2p → linear, 그 외 → shirley)
+                   - 'auto_anchor': True/False (자동 anchor 검출)
+                   - 'anchor_left', 'anchor_right': 사용자 지정 anchor BE 값
+                   - 'max_iter', 'tol': Shirley 수렴 파라미터
     """
     bg_kwargs = bg_kwargs or {}
 
@@ -957,7 +1324,9 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
     meta = meta or {}
     region = meta.get('region')
 
-    bg = shirley_background(be, counts, **bg_kwargs)
+    # BG 계산 (region 기반 자동 선택 가능)
+    bg_type = bg_kwargs.pop('bg_type', 'auto')
+    bg = compute_background(be, counts, bg_type=bg_type, region=region, **bg_kwargs)
     y_corr = counts - bg
 
     peaks_idx, y_smooth = detect_peaks_v2(be, y_corr, region)
@@ -979,10 +1348,9 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
     trials = []
 
     if is_doublet(region):
-        # Doublet 우선 시도
+        # Doublet 우선 시도 (대칭)
         max_states = max(1, min(effective_max_peaks, max(1, len(init_centers) // 2 + 1)))
         sorted_by_be = sorted(init_centers)
-        # main 후보: 모든 감지 피크 (fit_n_doublets가 알아서 상위 n개 사용)
         for n in range(1, max_states + 1):
             ranked = sorted(init_centers,
                             key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
@@ -990,6 +1358,29 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
             result = fit_n_doublets(be, y_corr, n, centers, region)
             if result is not None:
                 trials.append(result)
+
+        # ---- Satellite-region 전용 path (Cu/Fe/Ni/Co/Mn 2p) ----
+        if has_satellite(region):
+            # (1) Asymmetric doublet trial — main peak 비대칭성 표현
+            for n in range(1, max_states + 1):
+                ranked = sorted(init_centers,
+                                key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
+                centers = sorted(ranked[:n])
+                r_asym = fit_n_doublets(be, y_corr, n, centers, region,
+                                          use_asymmetric=True)
+                if r_asym is not None:
+                    trials.append(r_asym)
+
+            # (2) Satellite-aware fit (1-state main + satellite pair)
+            ranked = sorted(init_centers,
+                            key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
+            for sat_state in SATELLITE_PRIORS[region].keys():
+                for c0 in ranked[:2]:
+                    sat_result = fit_doublet_with_satellite(
+                        be, y_corr, region, sat_state, c0
+                    )
+                    if sat_result is not None:
+                        trials.append(sat_result)
 
         # Doublet이 안 맞으면 singlet fallback
         if not trials or (trials and min(t['r2'] for t in trials) < 0.9):
@@ -1015,16 +1406,77 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
         return {'success': False, 'reason': 'All fits failed',
                 'be': be, 'counts': counts, 'background': bg}
 
-    # AIC 최소 선택 (doublet이 같은 AIC면 우선)
-    best = min(trials, key=lambda r: (r['aic'],
-                                       0 if r['mode'] == 'doublet' else 1))
-    if best['r2'] < 0.9:
-        return {'success': False, 'reason': f'Best R²={best["r2"]:.3f} too low',
-                'be': be, 'counts': counts, 'background': bg}
+    # AIC 최소 선택 (mode 우선순위로 tie-break)
+    def _mode_priority(m):
+        return {
+            'doublet_with_satellite': 0,
+            'doublet_asym': 1,
+            'doublet': 2,
+        }.get(m, 3)
+    best = min(trials, key=lambda r: (r['aic'], _mode_priority(r['mode'])))
+
+    # R² threshold: satellite-region은 본질적으로 어려우므로 완화
+    r2_threshold = 0.80 if has_satellite(region) else 0.9
+    if best['r2'] < r2_threshold:
+        return {'success': False,
+                'reason': f'Best R²={best["r2"]:.3f} too low (threshold {r2_threshold})',
+                'be': be, 'counts': counts, 'background': bg,
+                'trials': [{'mode': t['mode'], 'r2': t['r2'], 'aic': t['aic'],
+                            'n_peaks': t.get('n_peaks')}
+                           for t in trials]}
 
     # 컴포넌트 정리
     components = []
-    if best['mode'] == 'doublet':
+    if best['mode'] == 'doublet_with_satellite':
+        # popt: [amp_m, c_m, fwhm, eta, sat_amp]
+        amp_m, c_m, fwhm, eta, sat_amp = best['popt']
+        delta_BE = best['delta_BE']
+        area_ratio = best['area_ratio']
+        sat_off_main = best['sat_offset_main']
+        sat_off_minor = best['sat_offset_minor']
+        sat_fwhm = fwhm * best['sat_fwhm_factor']
+        sat_state = best['sat_state']
+
+        # Main doublet pair
+        comp_main = pseudo_voigt(be, amp_m, c_m, fwhm, eta)
+        components.append({
+            'amplitude': float(amp_m), 'position': float(c_m),
+            'fwhm': float(fwhm), 'eta': float(eta),
+            'area': float(abs(np.trapezoid(comp_main, be))),
+            'curve': comp_main, 'label': f'{sat_state} main',
+            'is_satellite': False,
+        })
+        amp_minor = amp_m / area_ratio
+        c_minor = c_m + delta_BE
+        comp_minor = pseudo_voigt(be, amp_minor, c_minor, fwhm, eta)
+        components.append({
+            'amplitude': float(amp_minor), 'position': float(c_minor),
+            'fwhm': float(fwhm), 'eta': float(eta),
+            'area': float(abs(np.trapezoid(comp_minor, be))),
+            'curve': comp_minor, 'label': f'{sat_state} minor',
+            'is_satellite': False,
+        })
+        # Satellite pair
+        c_sat_main = c_m + sat_off_main
+        comp_sat_main = pseudo_voigt(be, sat_amp, c_sat_main, sat_fwhm, eta)
+        components.append({
+            'amplitude': float(sat_amp), 'position': float(c_sat_main),
+            'fwhm': float(sat_fwhm), 'eta': float(eta),
+            'area': float(abs(np.trapezoid(comp_sat_main, be))),
+            'curve': comp_sat_main, 'label': f'{sat_state} sat (main)',
+            'is_satellite': True,
+        })
+        sat_amp_minor = sat_amp / area_ratio
+        c_sat_minor = c_m + delta_BE + sat_off_minor
+        comp_sat_minor = pseudo_voigt(be, sat_amp_minor, c_sat_minor, sat_fwhm, eta)
+        components.append({
+            'amplitude': float(sat_amp_minor), 'position': float(c_sat_minor),
+            'fwhm': float(sat_fwhm), 'eta': float(eta),
+            'area': float(abs(np.trapezoid(comp_sat_minor, be))),
+            'curve': comp_sat_minor, 'label': f'{sat_state} sat (minor)',
+            'is_satellite': True,
+        })
+    elif best['mode'] == 'doublet':
         delta_BE = best['delta_BE']
         area_ratio = best['area_ratio']
         for i in range(best['n_peaks']):
@@ -1046,6 +1498,32 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
                 'area': float(abs(np.trapezoid(comp_y_n, be))),
                 'curve': comp_y_n,
                 'label': f'State {i+1} (minor)',
+            })
+    elif best['mode'] == 'doublet_asym':
+        # popt[0] = alpha (공유), popt[1:] = state별 [amp, c, fwhm, eta]
+        alpha = best['popt'][0]
+        state_params = best['popt'][1:]
+        delta_BE = best['delta_BE']
+        area_ratio = best['area_ratio']
+        for i in range(best['n_peaks']):
+            amp_m, c_m, fwhm, eta = state_params[i*4:i*4+4]
+            comp_y_m = asymmetric_pseudo_voigt(be, amp_m, c_m, fwhm, eta, alpha)
+            components.append({
+                'amplitude': float(amp_m), 'position': float(c_m),
+                'fwhm': float(fwhm), 'eta': float(eta), 'alpha': float(alpha),
+                'area': float(abs(np.trapezoid(comp_y_m, be))),
+                'curve': comp_y_m,
+                'label': f'State {i+1} (main, asym)',
+            })
+            amp_n = amp_m / area_ratio
+            c_n = c_m + delta_BE
+            comp_y_n = asymmetric_pseudo_voigt(be, amp_n, c_n, fwhm, eta, alpha)
+            components.append({
+                'amplitude': float(amp_n), 'position': float(c_n),
+                'fwhm': float(fwhm), 'eta': float(eta), 'alpha': float(alpha),
+                'area': float(abs(np.trapezoid(comp_y_n, be))),
+                'curve': comp_y_n,
+                'label': f'State {i+1} (minor, asym)',
             })
     else:
         for i in range(best['n_peaks']):
@@ -1070,7 +1548,7 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
         c['area_pct'] = 100 * c['area'] / total_area
 
     # ---- 화학적 라벨 자동 부여 (다중 산화수 원소) ----
-    # doublet 모드 + region이 MULTI_OX_PRIORS에 있을 때만
+    # 단순 doublet 모드 + region이 MULTI_OX_PRIORS에 있을 때만 (satellite 모드는 이미 라벨 있음)
     if best['mode'] == 'doublet' and region in MULTI_OX_PRIORS:
         components = label_components_by_oxidation(components, region)
 
@@ -1091,7 +1569,10 @@ def auto_fit_v3(be, counts, meta=None, max_peaks=None, bg_kwargs=None):
         'doublet_info': {
             'delta_BE': best.get('delta_BE'),
             'area_ratio': best.get('area_ratio'),
-        } if best['mode'] == 'doublet' else None,
+            'sat_state': best.get('sat_state'),
+            'sat_offset': best.get('sat_offset_main'),
+        } if best['mode'] in ('doublet', 'doublet_with_satellite') else None,
+        'bg_type': bg_kwargs.get('bg_type', 'auto'),  # 사용된 BG 타입 기록
     }
 
 
