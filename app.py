@@ -656,571 +656,581 @@ col4.metric("BE 범위", f"{be.max():.1f} → {be.min():.1f} eV")
 # =========================================================================
 # 모드 탭
 # =========================================================================
-tab_auto, tab_expert, tab_survey = st.tabs(
-    ["🤖 자동 모드", "🔬 Expert 모드 (Narrow)", "🌐 Survey 분석"]
-)
+# Survey scan이면 Survey 탭만 노출, Narrow이면 Auto/Expert 탭만 노출
+if auto_is_survey:
+    (tab_survey,) = st.tabs(["🌐 Survey 분석"])
+    tab_auto = None
+    tab_expert = None
+else:
+    tab_auto, tab_expert = st.tabs(
+        ["🤖 자동 모드", "🔬 Expert 모드 (Narrow)"]
+    )
+    tab_survey = None
 
 
 # -------------------------------------------------------------------
 # 자동 모드 — 자동 분기
 # -------------------------------------------------------------------
-with tab_auto:
-    if auto_is_survey:
-        st.success(
-            "📡 **Survey scan으로 자동 감지되어 원소 자동 식별 모드로 전환합니다.** "
-            "(BE 범위 500 eV 이상)"
-        )
-        with st.spinner("Survey 분석 중..."):
-            result = analyze_survey(be, counts)
-
-        if not result['success']:
-            track_error('survey_failed', where='auto_survey',
-                          details=str(result.get('reason', ''))[:100])
-            st.error(f"분석 실패: {result['reason']}")
-        else:
-            track_fitting_completed(
-                mode='survey',
-                region='survey',
-                r_squared=0,  # Survey는 R² 없음
-                n_components=len(result.get('matches', [])),
-                file_type=_file_ext,
+if not auto_is_survey:
+    with tab_auto:
+        if auto_is_survey:
+            st.success(
+                "📡 **Survey scan으로 자동 감지되어 원소 자동 식별 모드로 전환합니다.** "
+                "(BE 범위 500 eV 이상)"
             )
-            plot_survey_result(result, meta, st, key_prefix='auto')
+            with st.spinner("Survey 분석 중..."):
+                result = analyze_survey(be, counts)
 
-    else:
-        # ---- Narrow 자동 모드 (v0.7 단순 방식) ----
-        st.markdown("AIC 기반 자동 피크 개수 선택 + singlet/doublet 자동 분기")
-
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            all_regions = ['auto'] + list(ELEMENT_PRIORS.keys()) + list(DOUBLET_PRIORS.keys())
-            region_override = st.selectbox("Region", all_regions, index=0)
-        with col_b:
-            max_peaks = st.slider("최대 탐색 피크 수", 1, 6, 3)
-        with col_c:
-            manual_n = st.number_input("수동 지정 (0=자동)", 0, 6, 0)
-
-        force_singlet = st.checkbox("Doublet 강제 해제 (singlet만)", value=False)
-
-        eff_meta = dict(meta)
-        if region_override != 'auto':
-            eff_meta['region'] = region_override
-        if force_singlet and eff_meta.get('region') in DOUBLET_PRIORS:
-            eff_meta['region'] = 'unknown'
-
-        with st.spinner("피팅 중..."):
-            if manual_n == 0:
-                result = auto_fit_v3(be, counts, eff_meta,
-                                       max_peaks=max_peaks,
-                                       bg_kwargs=bg_kwargs)
+            if not result['success']:
+                track_error('survey_failed', where='auto_survey',
+                              details=str(result.get('reason', ''))[:100])
+                st.error(f"분석 실패: {result['reason']}")
             else:
-                bg = shirley_background(be, counts, **bg_kwargs)
-                y_corr = counts - bg
-                peaks_idx, _ = detect_peaks_v2(be, y_corr, eff_meta.get('region'))
-                if len(peaks_idx) == 0:
-                    st.error("피크 감지 실패"); st.stop()
-                init_centers = sorted([float(be[i]) for i in peaks_idx])
-                ranked = sorted(init_centers,
-                                key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
-                centers = sorted(ranked[:manual_n])
-                while len(centers) < manual_n:
-                    centers.append(centers[-1] - 1.5 if centers else float(be[np.argmax(y_corr)]))
-                if is_doublet(eff_meta.get('region')) and not force_singlet:
-                    fit = fit_n_doublets(be, y_corr, manual_n, centers, eff_meta['region'])
-                    _, _, _, _, dBE, ar = DOUBLET_PRIORS[eff_meta['region']]
-                    components = []
-                    for i in range(manual_n):
-                        amp_m, c_m, fwhm, eta = fit['popt'][i*4:i*4+4]
-                        cm = pseudo_voigt(be, amp_m, c_m, fwhm, eta)
-                        components.append({
-                            'amplitude': float(amp_m), 'position': float(c_m),
-                            'fwhm': float(fwhm), 'eta': float(eta),
-                            'area': float(abs(np.trapezoid(cm, be))),
-                            'curve': cm, 'label': f'State {i+1} (main)'})
-                        cn = pseudo_voigt(be, amp_m/ar, c_m+dBE, fwhm, eta)
-                        components.append({
-                            'amplitude': float(amp_m/ar), 'position': float(c_m+dBE),
-                            'fwhm': float(fwhm), 'eta': float(eta),
-                            'area': float(abs(np.trapezoid(cn, be))),
-                            'curve': cn, 'label': f'State {i+1} (minor)'})
+                track_fitting_completed(
+                    mode='survey',
+                    region='survey',
+                    r_squared=0,  # Survey는 R² 없음
+                    n_components=len(result.get('matches', [])),
+                    file_type=_file_ext,
+                )
+                plot_survey_result(result, meta, st, key_prefix='auto')
+
+        else:
+            # ---- Narrow 자동 모드 (v0.7 단순 방식) ----
+            st.markdown("AIC 기반 자동 피크 개수 선택 + singlet/doublet 자동 분기")
+
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                all_regions = ['auto'] + list(ELEMENT_PRIORS.keys()) + list(DOUBLET_PRIORS.keys())
+                region_override = st.selectbox("Region", all_regions, index=0)
+            with col_b:
+                max_peaks = st.slider("최대 탐색 피크 수", 1, 6, 3)
+            with col_c:
+                manual_n = st.number_input("수동 지정 (0=자동)", 0, 6, 0)
+
+            force_singlet = st.checkbox("Doublet 강제 해제 (singlet만)", value=False)
+
+            eff_meta = dict(meta)
+            if region_override != 'auto':
+                eff_meta['region'] = region_override
+            if force_singlet and eff_meta.get('region') in DOUBLET_PRIORS:
+                eff_meta['region'] = 'unknown'
+
+            with st.spinner("피팅 중..."):
+                if manual_n == 0:
+                    result = auto_fit_v3(be, counts, eff_meta,
+                                           max_peaks=max_peaks,
+                                           bg_kwargs=bg_kwargs)
                 else:
-                    fit = fit_n_peaks(be, y_corr, manual_n, centers, eff_meta.get('region'))
-                    if fit is None:
-                        st.error(f"{manual_n}개 피팅 실패"); st.stop()
-                    components = []
-                    for i in range(manual_n):
-                        a, c, f, e = fit['popt'][i*4:i*4+4]
-                        comp = pseudo_voigt(be, a, c, f, e)
-                        components.append({
-                            'amplitude': float(a), 'position': float(c),
-                            'fwhm': float(f), 'eta': float(e),
-                            'area': float(abs(np.trapezoid(comp, be))),
-                            'curve': comp, 'label': f'Peak {i+1}'})
-                components.sort(key=lambda c: -c['position'])
-                for i, c in enumerate(components):
-                    if c['label'].startswith('Peak '):
-                        c['label'] = f'Peak {i+1}'
-                tot = sum(c['area'] for c in components) or 1
-                for c in components:
-                    c['area_pct'] = 100 * c['area'] / tot
-                # 화학적 라벨링 (다중 산화수 원소면 Sn²⁺ 등으로)
-                _eff_region = eff_meta.get('region')
-                if (is_doublet(_eff_region) and not force_singlet
-                        and _eff_region in MULTI_OX_PRIORS):
-                    from xps_engine import label_components_by_oxidation
-                    components = label_components_by_oxidation(components, _eff_region)
-                result = {
-                    'success': True,
-                    'mode': 'doublet' if is_doublet(eff_meta.get('region')) and not force_singlet else 'singlet',
-                    'be': be, 'counts': counts, 'background': bg,
-                    'y_fit': fit['y_fit'], 'components': components,
-                    'r_squared': fit['r2'], 'rms': fit['rms'], 'aic': fit['aic'],
-                    'n_peaks': manual_n, 'trials': None, 'doublet_info': None,
-                }
+                    bg = shirley_background(be, counts, **bg_kwargs)
+                    y_corr = counts - bg
+                    peaks_idx, _ = detect_peaks_v2(be, y_corr, eff_meta.get('region'))
+                    if len(peaks_idx) == 0:
+                        st.error("피크 감지 실패"); st.stop()
+                    init_centers = sorted([float(be[i]) for i in peaks_idx])
+                    ranked = sorted(init_centers,
+                                    key=lambda c: -y_corr[int(np.argmin(np.abs(be - c)))])
+                    centers = sorted(ranked[:manual_n])
+                    while len(centers) < manual_n:
+                        centers.append(centers[-1] - 1.5 if centers else float(be[np.argmax(y_corr)]))
+                    if is_doublet(eff_meta.get('region')) and not force_singlet:
+                        fit = fit_n_doublets(be, y_corr, manual_n, centers, eff_meta['region'])
+                        _, _, _, _, dBE, ar = DOUBLET_PRIORS[eff_meta['region']]
+                        components = []
+                        for i in range(manual_n):
+                            amp_m, c_m, fwhm, eta = fit['popt'][i*4:i*4+4]
+                            cm = pseudo_voigt(be, amp_m, c_m, fwhm, eta)
+                            components.append({
+                                'amplitude': float(amp_m), 'position': float(c_m),
+                                'fwhm': float(fwhm), 'eta': float(eta),
+                                'area': float(abs(np.trapezoid(cm, be))),
+                                'curve': cm, 'label': f'State {i+1} (main)'})
+                            cn = pseudo_voigt(be, amp_m/ar, c_m+dBE, fwhm, eta)
+                            components.append({
+                                'amplitude': float(amp_m/ar), 'position': float(c_m+dBE),
+                                'fwhm': float(fwhm), 'eta': float(eta),
+                                'area': float(abs(np.trapezoid(cn, be))),
+                                'curve': cn, 'label': f'State {i+1} (minor)'})
+                    else:
+                        fit = fit_n_peaks(be, y_corr, manual_n, centers, eff_meta.get('region'))
+                        if fit is None:
+                            st.error(f"{manual_n}개 피팅 실패"); st.stop()
+                        components = []
+                        for i in range(manual_n):
+                            a, c, f, e = fit['popt'][i*4:i*4+4]
+                            comp = pseudo_voigt(be, a, c, f, e)
+                            components.append({
+                                'amplitude': float(a), 'position': float(c),
+                                'fwhm': float(f), 'eta': float(e),
+                                'area': float(abs(np.trapezoid(comp, be))),
+                                'curve': comp, 'label': f'Peak {i+1}'})
+                    components.sort(key=lambda c: -c['position'])
+                    for i, c in enumerate(components):
+                        if c['label'].startswith('Peak '):
+                            c['label'] = f'Peak {i+1}'
+                    tot = sum(c['area'] for c in components) or 1
+                    for c in components:
+                        c['area_pct'] = 100 * c['area'] / tot
+                    # 화학적 라벨링 (다중 산화수 원소면 Sn²⁺ 등으로)
+                    _eff_region = eff_meta.get('region')
+                    if (is_doublet(_eff_region) and not force_singlet
+                            and _eff_region in MULTI_OX_PRIORS):
+                        from xps_engine import label_components_by_oxidation
+                        components = label_components_by_oxidation(components, _eff_region)
+                    result = {
+                        'success': True,
+                        'mode': 'doublet' if is_doublet(eff_meta.get('region')) and not force_singlet else 'singlet',
+                        'be': be, 'counts': counts, 'background': bg,
+                        'y_fit': fit['y_fit'], 'components': components,
+                        'r_squared': fit['r2'], 'rms': fit['rms'], 'aic': fit['aic'],
+                        'n_peaks': manual_n, 'trials': None, 'doublet_info': None,
+                    }
 
-        if not result['success']:
-            track_error('fit_failed', where='auto_narrow',
-                          details=str(result.get('reason', ''))[:100])
-            st.error(f"피팅 실패: {result['reason']}")
-        else:
-            track_fitting_completed(
-                mode='auto',
-                region=meta.get('region', 'unknown'),
-                r_squared=result.get('r_squared', 0),
-                n_components=result.get('n_peaks', 0),
-                file_type=_file_ext,
-            )
-            mode_info = (f"{result['n_peaks']}개 " +
-                          ('상태(doublet)' if result['mode'] == 'doublet' else '피크'))
-            mc1, mc2, mc3, mc4 = st.columns(4)
-            mc1.metric("모델", mode_info)
-            mc2.metric("R²", f"{result['r_squared']:.4f}")
-            mc3.metric("RMS", f"{result['rms']:.1f}")
-            mc4.metric("AIC", f"{result['aic']:.1f}")
-            plot_narrow_result(result, meta, st, mode_label='auto')
+            if not result['success']:
+                track_error('fit_failed', where='auto_narrow',
+                              details=str(result.get('reason', ''))[:100])
+                st.error(f"피팅 실패: {result['reason']}")
+            else:
+                track_fitting_completed(
+                    mode='auto',
+                    region=meta.get('region', 'unknown'),
+                    r_squared=result.get('r_squared', 0),
+                    n_components=result.get('n_peaks', 0),
+                    file_type=_file_ext,
+                )
+                mode_info = (f"{result['n_peaks']}개 " +
+                              ('상태(doublet)' if result['mode'] == 'doublet' else '피크'))
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("모델", mode_info)
+                mc2.metric("R²", f"{result['r_squared']:.4f}")
+                mc3.metric("RMS", f"{result['rms']:.1f}")
+                mc4.metric("AIC", f"{result['aic']:.1f}")
+                plot_narrow_result(result, meta, st, mode_label='auto')
 
 
 
 
-# -------------------------------------------------------------------
-# Expert 모드 (v0.4와 동일, narrow 전용)
-# -------------------------------------------------------------------
-with tab_expert:
-    if auto_is_survey:
-        st.warning(
-            "⚠️ 업로드한 데이터는 Survey scan으로 보입니다 (BE 범위 500 eV 이상). "
-            "Expert 모드는 narrow scan용입니다. **Survey 분석** 탭을 사용하세요."
-        )
-    st.markdown("#### 🔬 Expert 모드 — 재료 기반 제약 피팅 (Narrow scan용)")
-    st.caption("논문 수준의 피팅. 재료 템플릿 선택 → 컴포넌트 편집 → 피팅.")
-
-    # ===========================================================
-    # 🤖 자동 제안 섹션 (선택, 접혀있는 상태로 시작)
-    # ===========================================================
-    with st.expander("🤖 자동 제안 받기 — 어떤 템플릿이 좋을지 모르겠다면",
-                       expanded=False):
-        st.caption(
-            "현재 데이터를 모든 호환 템플릿에 자동 매칭하고 R² 순으로 보여줍니다. "
-            "원하는 카드를 선택하면 아래 **재료 템플릿**이 그것으로 자동 전환됩니다."
-        )
-
-        # region 결정 (자동 감지 또는 사용자가 위에서 정한 것)
-        sugg_region = None
-        if region_detected and region_detected != 'unknown':
-            sugg_region = region_detected
-        else:
-            # BE 범위로 추정
-            be_center = (be.max() + be.min()) / 2
-            for r_name, (lo, hi) in [
-                ('F1s', (680, 695)), ('O1s', (525, 540)),
-                ('C1s', (280, 295)), ('N1s', (395, 410)),
-            ]:
-                if lo - 5 <= be_center <= hi + 5:
-                    sugg_region = r_name
-                    break
-
-        if not sugg_region:
+    # -------------------------------------------------------------------
+    # Expert 모드 (v0.4와 동일, narrow 전용)
+    # -------------------------------------------------------------------
+if not auto_is_survey:
+    with tab_expert:
+        if auto_is_survey:
             st.warning(
-                "Region을 추정할 수 없습니다. 아래 **재료 템플릿**에서 직접 선택해주세요."
+                "⚠️ 업로드한 데이터는 Survey scan으로 보입니다 (BE 범위 500 eV 이상). "
+                "Expert 모드는 narrow scan용입니다. **Survey 분석** 탭을 사용하세요."
             )
-        else:
-            run_match = st.button(
-                f"🔍 {sugg_region} 템플릿들 자동 매칭하기",
-                use_container_width=True,
-                key='run_auto_match'
+        st.markdown("#### 🔬 Expert 모드 — 재료 기반 제약 피팅 (Narrow scan용)")
+        st.caption("논문 수준의 피팅. 재료 템플릿 선택 → 컴포넌트 편집 → 피팅.")
+
+        # ===========================================================
+        # 🤖 자동 제안 섹션 (선택, 접혀있는 상태로 시작)
+        # ===========================================================
+        with st.expander("🤖 자동 제안 받기 — 어떤 템플릿이 좋을지 모르겠다면",
+                           expanded=False):
+            st.caption(
+                "현재 데이터를 모든 호환 템플릿에 자동 매칭하고 R² 순으로 보여줍니다. "
+                "원하는 카드를 선택하면 아래 **재료 템플릿**이 그것으로 자동 전환됩니다."
             )
 
-            # 한 번 누르면 결과를 session_state에 저장 (탭 전환 시 유지)
-            if run_match:
-                with st.spinner(f"{sugg_region} region의 모든 템플릿 매칭 중..."):
-                    match_results = auto_match_templates(
-                        be, counts, region_hint=sugg_region,
-                        bg_kwargs=bg_kwargs, max_results=6
-                    )
-                st.session_state['exp_match_results'] = match_results
-                st.session_state['exp_match_region'] = sugg_region
+            # region 결정 (자동 감지 또는 사용자가 위에서 정한 것)
+            sugg_region = None
+            if region_detected and region_detected != 'unknown':
+                sugg_region = region_detected
+            else:
+                # BE 범위로 추정
+                be_center = (be.max() + be.min()) / 2
+                for r_name, (lo, hi) in [
+                    ('F1s', (680, 695)), ('O1s', (525, 540)),
+                    ('C1s', (280, 295)), ('N1s', (395, 410)),
+                ]:
+                    if lo - 5 <= be_center <= hi + 5:
+                        sugg_region = r_name
+                        break
 
-            # 저장된 결과가 있으면 표시
-            saved_results = st.session_state.get('exp_match_results')
-            if saved_results and st.session_state.get('exp_match_region') == sugg_region:
-                st.success(f"✓ {len(saved_results)}개 모델 매칭 완료. "
-                            "원하는 결과의 **'이 템플릿 적용'** 버튼을 누르세요.")
+            if not sugg_region:
+                st.warning(
+                    "Region을 추정할 수 없습니다. 아래 **재료 템플릿**에서 직접 선택해주세요."
+                )
+            else:
+                run_match = st.button(
+                    f"🔍 {sugg_region} 템플릿들 자동 매칭하기",
+                    use_container_width=True,
+                    key='run_auto_match'
+                )
 
-                # 카드 표시 (3개씩 한 줄)
-                label_color = {
-                    'best': '🟢', 'good': '🟢',
-                    'acceptable': '🟡', 'poor': '🔴'
-                }
-                for row_start in range(0, len(saved_results), 3):
-                    cols = st.columns(3)
-                    for j, col in enumerate(cols):
-                        idx = row_start + j
-                        if idx >= len(saved_results):
-                            continue
-                        r = saved_results[idx]
-                        with col:
-                            marker = label_color.get(r.label, '⚪')
-                            star = '⭐ ' if r.rank == 1 else ''
-                            with st.container(border=True):
-                                # 카드 제목 (free position 표시는 짧게)
-                                disp_name = r.template_name.replace(
-                                    ' [free position]', ' (자유위치)'
-                                )
-                                st.markdown(f"**{star}{marker} {disp_name}**")
-                                cm1, cm2 = st.columns(2)
-                                cm1.metric("R²", f"{r.r_squared:.4f}")
-                                cm2.metric("자유도", r.n_free_params)
-                                st.caption(f"{r.n_components} components · "
-                                             f"{r.label}")
-                                # "적용" 버튼 → 그 템플릿 이름을 session_state에
-                                if st.button(
-                                    "이 템플릿 적용",
-                                    key=f"apply_template_{idx}",
-                                    use_container_width=True,
-                                ):
-                                    # Statistical auto는 Expert 템플릿이 아니라 적용 불가
-                                    if r.template_name.startswith('Statistical'):
-                                        st.warning(
-                                            "⚠️ Statistical auto는 통계 자동 모드입니다. "
-                                            "Expert에 적용할 수 없습니다. "
-                                            "자동 모드 탭에서 사용하세요."
-                                        )
-                                    else:
-                                        # 'XXX [free position]' → 'XXX'로 정규화
-                                        clean_name = r.template_name.replace(
-                                            ' [free position]', ''
-                                        )
-                                        # 평면 이름 → (family, material) 매핑
-                                        # 일관성: 자동 제안 후 Expert에서 같은 재료가 자동 선택됨
-                                        flat_to_hierarchy = {
-                                            'MOF (Zr-based)':
-                                                ('MOF', 'Zr-based (UiO-66/67, MOF-801/867)'),
-                                            'Metal oxide (generic)':
-                                                ('Metal Oxide', 'Generic (other oxides)'),
-                                            'Polymer with O (O1s)':
-                                                ('Polymer', 'With O functionalities (O1s)'),
-                                            'Polymer (C1s)':
-                                                ('Polymer', 'C1s — typical organic polymer'),
-                                            'Graphitic carbon (C1s)':
-                                                ('Polymer', 'Graphitic carbon (C1s)'),
-                                            'Fluorinated (F1s)':
-                                                ('Other (region only)', 'F1s (fluorinated)'),
-                                            'Nitrogen-containing (N1s)':
-                                                ('Other (region only)', 'N1s (nitrogen-containing)'),
-                                        }
-                                        mapped = flat_to_hierarchy.get(clean_name)
-                                        if mapped:
-                                            st.session_state['exp_family'] = mapped[0]
-                                            st.session_state['exp_material'] = mapped[1]
-                                            st.session_state['exp_template_applied'] = (
-                                                f"{mapped[0]} / {mapped[1]}"
+                # 한 번 누르면 결과를 session_state에 저장 (탭 전환 시 유지)
+                if run_match:
+                    with st.spinner(f"{sugg_region} region의 모든 템플릿 매칭 중..."):
+                        match_results = auto_match_templates(
+                            be, counts, region_hint=sugg_region,
+                            bg_kwargs=bg_kwargs, max_results=6
+                        )
+                    st.session_state['exp_match_results'] = match_results
+                    st.session_state['exp_match_region'] = sugg_region
+
+                # 저장된 결과가 있으면 표시
+                saved_results = st.session_state.get('exp_match_results')
+                if saved_results and st.session_state.get('exp_match_region') == sugg_region:
+                    st.success(f"✓ {len(saved_results)}개 모델 매칭 완료. "
+                                "원하는 결과의 **'이 템플릿 적용'** 버튼을 누르세요.")
+
+                    # 카드 표시 (3개씩 한 줄)
+                    label_color = {
+                        'best': '🟢', 'good': '🟢',
+                        'acceptable': '🟡', 'poor': '🔴'
+                    }
+                    for row_start in range(0, len(saved_results), 3):
+                        cols = st.columns(3)
+                        for j, col in enumerate(cols):
+                            idx = row_start + j
+                            if idx >= len(saved_results):
+                                continue
+                            r = saved_results[idx]
+                            with col:
+                                marker = label_color.get(r.label, '⚪')
+                                star = '⭐ ' if r.rank == 1 else ''
+                                with st.container(border=True):
+                                    # 카드 제목 (free position 표시는 짧게)
+                                    disp_name = r.template_name.replace(
+                                        ' [free position]', ' (자유위치)'
+                                    )
+                                    st.markdown(f"**{star}{marker} {disp_name}**")
+                                    cm1, cm2 = st.columns(2)
+                                    cm1.metric("R²", f"{r.r_squared:.4f}")
+                                    cm2.metric("자유도", r.n_free_params)
+                                    st.caption(f"{r.n_components} components · "
+                                                 f"{r.label}")
+                                    # "적용" 버튼 → 그 템플릿 이름을 session_state에
+                                    if st.button(
+                                        "이 템플릿 적용",
+                                        key=f"apply_template_{idx}",
+                                        use_container_width=True,
+                                    ):
+                                        # Statistical auto는 Expert 템플릿이 아니라 적용 불가
+                                        if r.template_name.startswith('Statistical'):
+                                            st.warning(
+                                                "⚠️ Statistical auto는 통계 자동 모드입니다. "
+                                                "Expert에 적용할 수 없습니다. "
+                                                "자동 모드 탭에서 사용하세요."
                                             )
                                         else:
-                                            st.session_state['exp_template_applied'] = clean_name
-                                        st.rerun()
+                                            # 'XXX [free position]' → 'XXX'로 정규화
+                                            clean_name = r.template_name.replace(
+                                                ' [free position]', ''
+                                            )
+                                            # 평면 이름 → (family, material) 매핑
+                                            # 일관성: 자동 제안 후 Expert에서 같은 재료가 자동 선택됨
+                                            flat_to_hierarchy = {
+                                                'MOF (Zr-based)':
+                                                    ('MOF', 'Zr-based (UiO-66/67, MOF-801/867)'),
+                                                'Metal oxide (generic)':
+                                                    ('Metal Oxide', 'Generic (other oxides)'),
+                                                'Polymer with O (O1s)':
+                                                    ('Polymer', 'With O functionalities (O1s)'),
+                                                'Polymer (C1s)':
+                                                    ('Polymer', 'C1s — typical organic polymer'),
+                                                'Graphitic carbon (C1s)':
+                                                    ('Polymer', 'Graphitic carbon (C1s)'),
+                                                'Fluorinated (F1s)':
+                                                    ('Other (region only)', 'F1s (fluorinated)'),
+                                                'Nitrogen-containing (N1s)':
+                                                    ('Other (region only)', 'N1s (nitrogen-containing)'),
+                                            }
+                                            mapped = flat_to_hierarchy.get(clean_name)
+                                            if mapped:
+                                                st.session_state['exp_family'] = mapped[0]
+                                                st.session_state['exp_material'] = mapped[1]
+                                                st.session_state['exp_template_applied'] = (
+                                                    f"{mapped[0]} / {mapped[1]}"
+                                                )
+                                            else:
+                                                st.session_state['exp_template_applied'] = clean_name
+                                            st.rerun()
 
-    # 적용된 템플릿 표시
-    applied_msg = st.session_state.get('exp_template_applied')
-    if applied_msg:
-        st.info(f"✓ **자동 제안에서 적용됨**: `{applied_msg}` "
-                  "— 아래에서 컴포넌트를 미세조정 후 피팅하세요.")
+        # 적용된 템플릿 표시
+        applied_msg = st.session_state.get('exp_template_applied')
+        if applied_msg:
+            st.info(f"✓ **자동 제안에서 적용됨**: `{applied_msg}` "
+                      "— 아래에서 컴포넌트를 미세조정 후 피팅하세요.")
 
-    # ===========================================================
-    # ===========================================================
-    # 재료 템플릿 선택 + 편집 (2단계 계층 dropdown)
-    # ===========================================================
-    st.markdown("#### 📚 재료 라이브러리")
-    st.caption(
-        "재료군을 먼저 선택하고, 그 안의 구체 재료를 선택하세요. "
-        "선택된 재료의 표준 컴포넌트가 자동으로 제안됩니다."
-    )
-
-    # 자동 제안에서 적용된 (family, material) 가져오기
-    applied_family = st.session_state.get('exp_family')
-    applied_material = st.session_state.get('exp_material')
-
-    # session_state 적용 → region_detected 기반 default 결정
-    families = get_hierarchy_families()
-
-    # default family 결정
-    default_family_idx = 0
-    if applied_family and applied_family in families:
-        default_family_idx = families.index(applied_family)
-    elif region_detected and region_detected != 'unknown':
-        # region에 매칭되는 family 우선
-        for i, fam in enumerate(families):
-            fam_data = MATERIAL_HIERARCHY[fam]
-            # family region 또는 하위 material region 중 하나라도 매칭
-            if fam_data.get('region') == region_detected:
-                default_family_idx = i
-                break
-
-    col_t1, col_t2 = st.columns(2)
-    with col_t1:
-        selected_family = st.selectbox(
-            "1️⃣ 재료군",
-            options=families,
-            index=default_family_idx,
-            key='exp_family_select',
-            help="크게 어떤 종류의 재료인가요?"
-        )
-    with col_t2:
-        materials = get_hierarchy_materials(selected_family)
-        # default material 결정
-        default_mat_idx = 0
-        if (applied_family == selected_family and
-                applied_material and applied_material in materials):
-            default_mat_idx = materials.index(applied_material)
-        selected_material = st.selectbox(
-            "2️⃣ 구체 재료",
-            options=materials,
-            index=default_mat_idx,
-            key='exp_material_select',
-            help=f"{selected_family} 그룹의 어떤 재료인가요?"
+        # ===========================================================
+        # ===========================================================
+        # 재료 템플릿 선택 + 편집 (2단계 계층 dropdown)
+        # ===========================================================
+        st.markdown("#### 📚 재료 라이브러리")
+        st.caption(
+            "재료군을 먼저 선택하고, 그 안의 구체 재료를 선택하세요. "
+            "선택된 재료의 표준 컴포넌트가 자동으로 제안됩니다."
         )
 
-    # 선택된 템플릿 가져오기
-    tmpl = get_hierarchy_template(selected_family, selected_material)
+        # 자동 제안에서 적용된 (family, material) 가져오기
+        applied_family = st.session_state.get('exp_family')
+        applied_material = st.session_state.get('exp_material')
 
-    # region 미스매치 경고
-    tmpl_region = tmpl['region']
-    if region_detected and region_detected != 'unknown' and tmpl_region != region_detected:
-        st.warning(
-            f"⚠️ 선택한 재료는 **{tmpl_region}** region용인데, "
-            f"업로드된 데이터는 **{region_detected}** region입니다. "
-            f"region이 맞는 재료를 선택하시거나, 데이터가 의도한 영역인지 확인해주세요."
-        )
+        # session_state 적용 → region_detected 기반 default 결정
+        families = get_hierarchy_families()
 
-    st.info(f"**{tmpl['description']}**  \n참조: *{tmpl['reference']}*  \n"
-            f"기본 컴포넌트 {len(tmpl['components'])}개" +
-            (f" + 옵션 {len(tmpl.get('optional_components', []))}개"
-             if tmpl.get('optional_components') else ""))
+        # default family 결정
+        default_family_idx = 0
+        if applied_family and applied_family in families:
+            default_family_idx = families.index(applied_family)
+        elif region_detected and region_detected != 'unknown':
+            # region에 매칭되는 family 우선
+            for i, fam in enumerate(families):
+                fam_data = MATERIAL_HIERARCHY[fam]
+                # family region 또는 하위 material region 중 하나라도 매칭
+                if fam_data.get('region') == region_detected:
+                    default_family_idx = i
+                    break
 
-    # 옵션 컴포넌트
-    selected_optional = []
-    if tmpl.get('optional_components'):
-        st.markdown("**옵션 컴포넌트** (체크 시 추가됨)")
-        for opt in tmpl['optional_components']:
-            opt_key = f"opt_{selected_family}_{selected_material}_{opt['name']}"
-            checked = st.checkbox(
-                f"{opt['name']} ({opt['be']} eV) — {opt.get('hint', '')}",
-                key=opt_key
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            selected_family = st.selectbox(
+                "1️⃣ 재료군",
+                options=families,
+                index=default_family_idx,
+                key='exp_family_select',
+                help="크게 어떤 종류의 재료인가요?"
             )
-            if checked:
-                selected_optional.append(opt['name'])
+        with col_t2:
+            materials = get_hierarchy_materials(selected_family)
+            # default material 결정
+            default_mat_idx = 0
+            if (applied_family == selected_family and
+                    applied_material and applied_material in materials):
+                default_mat_idx = materials.index(applied_material)
+            selected_material = st.selectbox(
+                "2️⃣ 구체 재료",
+                options=materials,
+                index=default_mat_idx,
+                key='exp_material_select',
+                help=f"{selected_family} 그룹의 어떤 재료인가요?"
+            )
 
-    # 컴포넌트 생성 (계층 함수 사용)
-    base_comps = hierarchy_components(selected_family, selected_material,
-                                         include_optional=selected_optional)
+        # 선택된 템플릿 가져오기
+        tmpl = get_hierarchy_template(selected_family, selected_material)
 
-    st.markdown("#### 컴포넌트 상세 설정")
-    edited_comps = []
-    for i, c in enumerate(base_comps):
-        with st.expander(f"**{c.name}** @ {c.be} eV", expanded=False):
-            cc1, cc2, cc3 = st.columns(3)
-            ukey = f"{selected_family}_{selected_material}_{c.name}_{i}"
-            with cc1:
-                be_center = st.number_input(
-                    "BE 중심 (eV)", value=float(c.be), step=0.05, format="%.2f",
-                    key=f"be_{ukey}"
+        # region 미스매치 경고
+        tmpl_region = tmpl['region']
+        if region_detected and region_detected != 'unknown' and tmpl_region != region_detected:
+            st.warning(
+                f"⚠️ 선택한 재료는 **{tmpl_region}** region용인데, "
+                f"업로드된 데이터는 **{region_detected}** region입니다. "
+                f"region이 맞는 재료를 선택하시거나, 데이터가 의도한 영역인지 확인해주세요."
+            )
+
+        st.info(f"**{tmpl['description']}**  \n참조: *{tmpl['reference']}*  \n"
+                f"기본 컴포넌트 {len(tmpl['components'])}개" +
+                (f" + 옵션 {len(tmpl.get('optional_components', []))}개"
+                 if tmpl.get('optional_components') else ""))
+
+        # 옵션 컴포넌트
+        selected_optional = []
+        if tmpl.get('optional_components'):
+            st.markdown("**옵션 컴포넌트** (체크 시 추가됨)")
+            for opt in tmpl['optional_components']:
+                opt_key = f"opt_{selected_family}_{selected_material}_{opt['name']}"
+                checked = st.checkbox(
+                    f"{opt['name']} ({opt['be']} eV) — {opt.get('hint', '')}",
+                    key=opt_key
                 )
-                lock_pos = st.checkbox(
-                    "위치 완전 고정",
-                    value=False,
-                    key=f"lock_{ukey}",
-                    help=(
-                        "**위치 완전 고정**: 이 컴포넌트의 BE 중심을 정확히 위 값에 고정합니다.\n\n"
-                        "**체크하면**: 피팅 중 BE가 절대 움직이지 않음. "
-                        "위 'BE 중심' 값이 그대로 유지됩니다.\n\n"
-                        "**체크 해제 시**: 'BE 이동 ± (eV)' 범위 안에서 자유롭게 이동 가능.\n\n"
-                        "**언제 고정**: 문헌에서 정확한 위치를 알고 있고, 그 위치가 절대적인 "
-                        "기준일 때 (예: 표준 reference 화합물의 알려진 BE)."
+                if checked:
+                    selected_optional.append(opt['name'])
+
+        # 컴포넌트 생성 (계층 함수 사용)
+        base_comps = hierarchy_components(selected_family, selected_material,
+                                             include_optional=selected_optional)
+
+        st.markdown("#### 컴포넌트 상세 설정")
+        edited_comps = []
+        for i, c in enumerate(base_comps):
+            with st.expander(f"**{c.name}** @ {c.be} eV", expanded=False):
+                cc1, cc2, cc3 = st.columns(3)
+                ukey = f"{selected_family}_{selected_material}_{c.name}_{i}"
+                with cc1:
+                    be_center = st.number_input(
+                        "BE 중심 (eV)", value=float(c.be), step=0.05, format="%.2f",
+                        key=f"be_{ukey}"
                     )
+                    lock_pos = st.checkbox(
+                        "위치 완전 고정",
+                        value=False,
+                        key=f"lock_{ukey}",
+                        help=(
+                            "**위치 완전 고정**: 이 컴포넌트의 BE 중심을 정확히 위 값에 고정합니다.\n\n"
+                            "**체크하면**: 피팅 중 BE가 절대 움직이지 않음. "
+                            "위 'BE 중심' 값이 그대로 유지됩니다.\n\n"
+                            "**체크 해제 시**: 'BE 이동 ± (eV)' 범위 안에서 자유롭게 이동 가능.\n\n"
+                            "**언제 고정**: 문헌에서 정확한 위치를 알고 있고, 그 위치가 절대적인 "
+                            "기준일 때 (예: 표준 reference 화합물의 알려진 BE)."
+                        )
+                    )
+                with cc2:
+                    be_tol = st.number_input(
+                        "BE 이동 ± (eV)", value=float(c.be_tol),
+                        min_value=0.0, max_value=2.0, step=0.05, format="%.2f",
+                        key=f"tol_{ukey}", disabled=lock_pos
+                    )
+                    fwhm_min = st.number_input(
+                        "FWHM 최소 (eV)", value=float(c.fwhm_min),
+                        min_value=0.3, step=0.1, format="%.1f", key=f"fmin_{ukey}"
+                    )
+                with cc3:
+                    fwhm_max = st.number_input(
+                        "FWHM 최대 (eV)", value=float(c.fwhm_max),
+                        min_value=0.4, step=0.1, format="%.1f", key=f"fmax_{ukey}"
+                    )
+                edited_comps.append(ComponentSpec(
+                    name=c.name, be=be_center, be_tol=be_tol,
+                    fwhm_min=fwhm_min, fwhm_max=fwhm_max,
+                    lock_position=lock_pos
+                ))
+
+        st.markdown("#### 전역 제약")
+        gc1, gc2, gc3 = st.columns(3)
+        with gc1:
+            share_fwhm = st.checkbox(
+                "모든 컴포넌트 FWHM 공유",
+                value=False,
+                help=(
+                    "**FWHM 공유**: 같은 재료의 모든 컴포넌트가 동일한 FWHM 값을 갖도록 강제합니다.\n\n"
+                    "**언제 사용**: 같은 화학 환경의 재료(예: 동일 MOF의 다양한 산소 환경)에서는 "
+                    "물리적으로 FWHM이 비슷합니다. 공유로 강제하면 자유 파라미터가 줄어 "
+                    "**과적합(overfitting) 방지**에 효과적입니다.\n\n"
+                    "**효과**: 자유도 N개 → 1개로 줄어듦 (N=컴포넌트 수). "
+                    "R²는 살짝 낮아질 수 있지만 결과의 화학적 신뢰도는 높아집니다."
                 )
-            with cc2:
-                be_tol = st.number_input(
-                    "BE 이동 ± (eV)", value=float(c.be_tol),
-                    min_value=0.0, max_value=2.0, step=0.05, format="%.2f",
-                    key=f"tol_{ukey}", disabled=lock_pos
+            )
+        with gc2:
+            share_eta = st.checkbox(
+                "모든 컴포넌트 η 공유",
+                value=False,
+                help=(
+                    "**η (eta) 공유**: 모든 컴포넌트가 동일한 Gauss-Lorentz 혼합비를 갖도록 강제합니다.\n\n"
+                    "**η 의미**: pseudo-Voigt에서 η=0이면 순수 Gaussian, η=1이면 순수 Lorentzian, "
+                    "그 사이는 혼합 비율입니다. 같은 측정 장비/조건에서는 η가 거의 일정합니다.\n\n"
+                    "**언제 사용**: 같은 측정 조건의 동일 재료라면 거의 항상 켜는 것이 안전합니다. "
+                    "**효과**: 자유 파라미터 추가로 줄임. 결과가 화학적으로 더 안정됩니다."
                 )
-                fwhm_min = st.number_input(
-                    "FWHM 최소 (eV)", value=float(c.fwhm_min),
-                    min_value=0.3, step=0.1, format="%.1f", key=f"fmin_{ukey}"
+            )
+        with gc3:
+            use_shirley_exp = st.checkbox(
+                "Shirley 배경 보정",
+                value=True,
+                help=(
+                    "**Shirley 배경 보정**: iterative Shirley 알고리즘으로 비탄성 산란 배경을 제거합니다.\n\n"
+                    "**언제 켜기**: 일반적인 raw XPS 데이터 (배경 미제거 상태). 거의 항상 ON.\n\n"
+                    "**언제 끄기**: 데이터가 이미 배경 제거된 경우 "
+                    "(예: 논문에서 normalized된 데이터, peak fitting 후 export된 데이터). "
+                    "끄면 background = 0으로 가정합니다.\n\n"
+                    "💡 사이드바의 'Background Anchor' 옵션과 함께 작동합니다."
                 )
-            with cc3:
-                fwhm_max = st.number_input(
-                    "FWHM 최대 (eV)", value=float(c.fwhm_max),
-                    min_value=0.4, step=0.1, format="%.1f", key=f"fmax_{ukey}"
+            )
+
+        n_params = sum(1 + (0 if c.lock_position else 1)
+                        + (0 if share_fwhm else 1)
+                        + (0 if share_eta else 1) for c in edited_comps)
+        n_params += (1 if share_fwhm else 0) + (1 if share_eta else 0)
+        st.caption(f"📊 자유 파라미터 ≈ **{n_params}개**")
+
+        fit_btn = st.button("🎯 Expert 피팅 실행", type='primary',
+                              use_container_width=True)
+
+        if fit_btn:
+            with st.spinner("제약 피팅 중..."):
+                exp_result = expert_fit(
+                    be, counts, edited_comps,
+                    share_fwhm=share_fwhm, share_eta=share_eta,
+                    use_shirley=use_shirley_exp,
+                    bg_kwargs=bg_kwargs,
                 )
-            edited_comps.append(ComponentSpec(
-                name=c.name, be=be_center, be_tol=be_tol,
-                fwhm_min=fwhm_min, fwhm_max=fwhm_max,
-                lock_position=lock_pos
-            ))
-
-    st.markdown("#### 전역 제약")
-    gc1, gc2, gc3 = st.columns(3)
-    with gc1:
-        share_fwhm = st.checkbox(
-            "모든 컴포넌트 FWHM 공유",
-            value=False,
-            help=(
-                "**FWHM 공유**: 같은 재료의 모든 컴포넌트가 동일한 FWHM 값을 갖도록 강제합니다.\n\n"
-                "**언제 사용**: 같은 화학 환경의 재료(예: 동일 MOF의 다양한 산소 환경)에서는 "
-                "물리적으로 FWHM이 비슷합니다. 공유로 강제하면 자유 파라미터가 줄어 "
-                "**과적합(overfitting) 방지**에 효과적입니다.\n\n"
-                "**효과**: 자유도 N개 → 1개로 줄어듦 (N=컴포넌트 수). "
-                "R²는 살짝 낮아질 수 있지만 결과의 화학적 신뢰도는 높아집니다."
-            )
-        )
-    with gc2:
-        share_eta = st.checkbox(
-            "모든 컴포넌트 η 공유",
-            value=False,
-            help=(
-                "**η (eta) 공유**: 모든 컴포넌트가 동일한 Gauss-Lorentz 혼합비를 갖도록 강제합니다.\n\n"
-                "**η 의미**: pseudo-Voigt에서 η=0이면 순수 Gaussian, η=1이면 순수 Lorentzian, "
-                "그 사이는 혼합 비율입니다. 같은 측정 장비/조건에서는 η가 거의 일정합니다.\n\n"
-                "**언제 사용**: 같은 측정 조건의 동일 재료라면 거의 항상 켜는 것이 안전합니다. "
-                "**효과**: 자유 파라미터 추가로 줄임. 결과가 화학적으로 더 안정됩니다."
-            )
-        )
-    with gc3:
-        use_shirley_exp = st.checkbox(
-            "Shirley 배경 보정",
-            value=True,
-            help=(
-                "**Shirley 배경 보정**: iterative Shirley 알고리즘으로 비탄성 산란 배경을 제거합니다.\n\n"
-                "**언제 켜기**: 일반적인 raw XPS 데이터 (배경 미제거 상태). 거의 항상 ON.\n\n"
-                "**언제 끄기**: 데이터가 이미 배경 제거된 경우 "
-                "(예: 논문에서 normalized된 데이터, peak fitting 후 export된 데이터). "
-                "끄면 background = 0으로 가정합니다.\n\n"
-                "💡 사이드바의 'Background Anchor' 옵션과 함께 작동합니다."
-            )
-        )
-
-    n_params = sum(1 + (0 if c.lock_position else 1)
-                    + (0 if share_fwhm else 1)
-                    + (0 if share_eta else 1) for c in edited_comps)
-    n_params += (1 if share_fwhm else 0) + (1 if share_eta else 0)
-    st.caption(f"📊 자유 파라미터 ≈ **{n_params}개**")
-
-    fit_btn = st.button("🎯 Expert 피팅 실행", type='primary',
-                          use_container_width=True)
-
-    if fit_btn:
-        with st.spinner("제약 피팅 중..."):
-            exp_result = expert_fit(
-                be, counts, edited_comps,
-                share_fwhm=share_fwhm, share_eta=share_eta,
-                use_shirley=use_shirley_exp,
-                bg_kwargs=bg_kwargs,
-            )
-        if not exp_result['success']:
-            track_error('expert_fit_failed', where='expert',
-                          details=str(exp_result.get('reason', ''))[:100])
-            st.error(f"피팅 실패: {exp_result['reason']}")
-        else:
-            track_fitting_completed(
-                mode='expert',
-                region=meta.get('region', 'unknown'),
-                r_squared=exp_result.get('r_squared', 0),
-                n_components=exp_result.get('n_components', 0),
-                file_type=_file_ext,
-            )
-            em1, em2, em3, em4 = st.columns(4)
-            em1.metric("컴포넌트 수", exp_result['n_components'])
-            em2.metric("R²", f"{exp_result['r_squared']:.4f}")
-            em3.metric("자유 파라미터", exp_result['n_free_params'])
-            em4.metric("AIC", f"{exp_result['aic']:.1f}")
-            if exp_result.get('shared_fwhm_value'):
-                st.info(f"🔗 공유 FWHM: {exp_result['shared_fwhm_value']:.3f} eV")
-            plot_narrow_result(exp_result, meta, st, mode_label='expert')
-
-            tiny = [c for c in exp_result['components'] if c['area_pct'] < 5]
-            if tiny:
-                names = ", ".join([f"{c['name']} ({c['area_pct']:.1f}%)" for c in tiny])
-                st.warning(
-                    f"⚠️ **정직성 체크**: {names} — 면적 5% 미만. "
-                    f"데이터가 이 컴포넌트를 실제로 지지하지 않을 수 있습니다."
-                )
-
-
-# -------------------------------------------------------------------
-# Survey 탭 (명시적)
-# -------------------------------------------------------------------
-with tab_survey:
-    if not auto_is_survey:
-        st.warning(
-            "⚠️ 업로드한 데이터는 Narrow scan으로 보입니다 (BE 범위 500 eV 미만). "
-            "Survey 분석은 일반적으로 0~1400 eV 정도의 wide scan에 적합합니다. "
-            "그래도 아래에서 분석을 시도할 수 있지만, 결과가 의미 없을 수 있습니다."
-        )
-
-    st.markdown("#### 🌐 Survey 분석 — 원소 자동 식별 + 근사 정량")
-    st.caption(
-        "다중 라인 자기일관성 검증으로 원소를 식별합니다. "
-        "충전(charging) 시프트는 자동으로 흡수됩니다."
-    )
-
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        tolerance = st.slider(
-            "Primary line tolerance (eV)", 1.0, 8.0, 4.0, 0.5,
-            help="검출 피크가 DB 위치에서 얼마나 벗어나도 매칭으로 인정할지. "
-                 "충전이 큰 샘플은 6~8 eV로."
-        )
-    with col_s2:
-        min_prominence = st.slider(
-            "피크 검출 민감도 (%)", 1.0, 10.0, 2.0, 0.5,
-            help="작을수록 약한 피크도 잡힘. 노이즈가 많으면 4~5%로 올리세요."
-        ) / 100.0
-
-    run_survey = st.button("🌐 Survey 분석 실행", type='primary',
-                             use_container_width=True, key='run_survey_btn')
-
-    if run_survey or auto_is_survey:
-        with st.spinner("Survey 분석 중..."):
-            # 임시: prominence 조절을 위해 직접 호출
-            from xps_survey import detect_survey_peaks, identify_elements, quantify_atomic_percent
-            detected, bg = detect_survey_peaks(be, counts,
-                                                  prominence_ratio=min_prominence)
-            if not detected:
-                st.error("피크 감지 실패. 검출 민감도를 낮춰보세요.")
+            if not exp_result['success']:
+                track_error('expert_fit_failed', where='expert',
+                              details=str(exp_result.get('reason', ''))[:100])
+                st.error(f"피팅 실패: {exp_result['reason']}")
             else:
-                matches = identify_elements(detected, (be.min(), be.max()),
-                                              tolerance_ev=tolerance)
-                quant = quantify_atomic_percent(matches,
-                                                  only_high_confidence=True)
-                survey_result = {
-                    'success': True, 'mode': 'survey',
-                    'be': be, 'counts': counts, 'background': bg,
-                    'detected_peaks': detected,
-                    'matches': matches,
-                    'quantification': quant,
-                    'n_elements': len([m for m in matches if m.confidence != 'low']),
-                }
-                plot_survey_result(survey_result, meta, st, key_prefix='manual')
+                track_fitting_completed(
+                    mode='expert',
+                    region=meta.get('region', 'unknown'),
+                    r_squared=exp_result.get('r_squared', 0),
+                    n_components=exp_result.get('n_components', 0),
+                    file_type=_file_ext,
+                )
+                em1, em2, em3, em4 = st.columns(4)
+                em1.metric("컴포넌트 수", exp_result['n_components'])
+                em2.metric("R²", f"{exp_result['r_squared']:.4f}")
+                em3.metric("자유 파라미터", exp_result['n_free_params'])
+                em4.metric("AIC", f"{exp_result['aic']:.1f}")
+                if exp_result.get('shared_fwhm_value'):
+                    st.info(f"🔗 공유 FWHM: {exp_result['shared_fwhm_value']:.3f} eV")
+                plot_narrow_result(exp_result, meta, st, mode_label='expert')
+
+                tiny = [c for c in exp_result['components'] if c['area_pct'] < 5]
+                if tiny:
+                    names = ", ".join([f"{c['name']} ({c['area_pct']:.1f}%)" for c in tiny])
+                    st.warning(
+                        f"⚠️ **정직성 체크**: {names} — 면적 5% 미만. "
+                        f"데이터가 이 컴포넌트를 실제로 지지하지 않을 수 있습니다."
+                    )
+
+
+    # -------------------------------------------------------------------
+    # Survey 탭 (명시적)
+    # -------------------------------------------------------------------
+if auto_is_survey:
+    with tab_survey:
+        if not auto_is_survey:
+            st.warning(
+                "⚠️ 업로드한 데이터는 Narrow scan으로 보입니다 (BE 범위 500 eV 미만). "
+                "Survey 분석은 일반적으로 0~1400 eV 정도의 wide scan에 적합합니다. "
+                "그래도 아래에서 분석을 시도할 수 있지만, 결과가 의미 없을 수 있습니다."
+            )
+
+        st.markdown("#### 🌐 Survey 분석 — 원소 자동 식별 + 근사 정량")
+        st.caption(
+            "다중 라인 자기일관성 검증으로 원소를 식별합니다. "
+            "충전(charging) 시프트는 자동으로 흡수됩니다."
+        )
+
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            tolerance = st.slider(
+                "Primary line tolerance (eV)", 1.0, 8.0, 4.0, 0.5,
+                help="검출 피크가 DB 위치에서 얼마나 벗어나도 매칭으로 인정할지. "
+                     "충전이 큰 샘플은 6~8 eV로."
+            )
+        with col_s2:
+            min_prominence = st.slider(
+                "피크 검출 민감도 (%)", 1.0, 10.0, 2.0, 0.5,
+                help="작을수록 약한 피크도 잡힘. 노이즈가 많으면 4~5%로 올리세요."
+            ) / 100.0
+
+        run_survey = st.button("🌐 Survey 분석 실행", type='primary',
+                                 use_container_width=True, key='run_survey_btn')
+
+        if run_survey or auto_is_survey:
+            with st.spinner("Survey 분석 중..."):
+                # 임시: prominence 조절을 위해 직접 호출
+                from xps_survey import detect_survey_peaks, identify_elements, quantify_atomic_percent
+                detected, bg = detect_survey_peaks(be, counts,
+                                                      prominence_ratio=min_prominence)
+                if not detected:
+                    st.error("피크 감지 실패. 검출 민감도를 낮춰보세요.")
+                else:
+                    matches = identify_elements(detected, (be.min(), be.max()),
+                                                  tolerance_ev=tolerance)
+                    quant = quantify_atomic_percent(matches,
+                                                      only_high_confidence=True)
+                    survey_result = {
+                        'success': True, 'mode': 'survey',
+                        'be': be, 'counts': counts, 'background': bg,
+                        'detected_peaks': detected,
+                        'matches': matches,
+                        'quantification': quant,
+                        'n_elements': len([m for m in matches if m.confidence != 'low']),
+                    }
+                    plot_survey_result(survey_result, meta, st, key_prefix='manual')
 
 
 # =========================================================================
