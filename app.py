@@ -257,7 +257,7 @@ def plot_survey_result(result, meta, container, key_prefix='survey'):
     container.pyplot(fig)
 
     # 식별된 원소 테이블
-    container.subheader("🧪 검출된 원소")
+    container.subheader("검출된 원소")
     rows = []
     for m in result['matches']:
         primary_shift = m.matched_lines[0]['be_shift']
@@ -275,7 +275,7 @@ def plot_survey_result(result, meta, container, key_prefix='survey'):
     container.dataframe(df_elem, use_container_width=True, hide_index=True)
 
     # 신뢰도 안내
-    with container.expander("ℹ️ Confidence 등급 설명"):
+    with container.expander("Confidence 등급 설명"):
         st.markdown("""
 - **HIGH** ★ Primary line + 2개 이상의 secondary line이 일관된 시프트로 매칭됨.
   → 매우 높은 신뢰도. 이 원소는 거의 확실히 샘플에 존재.
@@ -288,7 +288,7 @@ def plot_survey_result(result, meta, container, key_prefix='survey'):
 
     # Atomic % 정량
     container.divider()
-    container.subheader("📊 Approximate Atomic Composition")
+    container.subheader("Approximate Atomic Composition")
     container.warning(
         "⚠️ **이 정량값은 근사치입니다.** "
         "Survey scan 기반 정량은 다음 한계를 가집니다:\n"
@@ -1240,7 +1240,7 @@ with fc2:
 
 st.markdown(
     "<div style='text-align:center; color:#888; padding:1rem 0; font-size:0.85em;'>"
-    "XPS AutoFit · v0.5 · 결과는 항상 도메인 지식으로 검증하세요."
+    "XPS AutoFit · 결과는 항상 도메인 지식으로 검증하세요."
     "</div>",
     unsafe_allow_html=True
 )
