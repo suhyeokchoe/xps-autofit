@@ -384,7 +384,6 @@ def plot_survey_result(result, meta, container, key_prefix='survey'):
 # 제목
 # =========================================================================
 st.title("📊 XPS AutoFit")
-st.caption("자동 XPS 피팅 · v0.5 · Survey scan 자동 분석 추가")
 
 # 익명 방문 통계 (세션당 1회)
 track_app_opened()
@@ -408,7 +407,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.header("🎯 Calibration")
+    st.header("Calibration")
     apply_cal = st.checkbox(
         "BE offset 적용",
         value=False,
@@ -426,7 +425,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.header("📐 Background Anchor")
+    st.header("Background Anchor")
     st.caption(
         "Shirley BG의 시작/끝 위치를 결정합니다. "
         "복잡한 데이터는 자동 감지가 부정확할 수 있습니다."
@@ -464,7 +463,7 @@ with st.sidebar:
 # 업로드 전
 # =========================================================================
 if uploaded is None:
-    st.info("👈 사이드바에서 XPS 데이터 파일을 업로드하세요.")
+    st.info("👈 사이드바에 XPS 데이터 파일을 업로드하세요.")
     st.stop()
 
 
@@ -639,7 +638,7 @@ if auto_is_survey:
     tab_expert = None
 else:
     tab_auto, tab_expert = st.tabs(
-        ["🤖 자동 모드", "🔬 Expert 모드 (Narrow)"]
+        ["자동 모드", "Expert 모드 (Narrow)"]
     )
     tab_survey = None
 
@@ -797,13 +796,13 @@ if not auto_is_survey:
                 "⚠️ 업로드한 데이터는 Survey scan으로 보입니다 (BE 범위 500 eV 이상). "
                 "Expert 모드는 narrow scan용입니다. **Survey 분석** 탭을 사용하세요."
             )
-        st.markdown("#### 🔬 Expert 모드 — 재료 기반 제약 피팅 (Narrow scan용)")
+        st.markdown("#### Expert 모드 — 재료 기반 제약 피팅 (Narrow scan용)")
         st.caption("논문 수준의 피팅. 재료 템플릿 선택 → 컴포넌트 편집 → 피팅.")
 
         # ===========================================================
         # 🤖 자동 제안 섹션 (선택, 접혀있는 상태로 시작)
         # ===========================================================
-        with st.expander("🤖 자동 제안 받기 — 어떤 템플릿이 좋을지 모르겠다면",
+        with st.expander("자동 제안 받기 — 어떤 템플릿이 좋을지 모르겠다면",
                            expanded=False):
             st.caption(
                 "현재 데이터를 모든 호환 템플릿에 자동 매칭하고 R² 순으로 보여줍니다. "
@@ -935,7 +934,7 @@ if not auto_is_survey:
         # ===========================================================
         # 재료 템플릿 선택 + 편집 (2단계 계층 dropdown)
         # ===========================================================
-        st.markdown("#### 📚 재료 라이브러리")
+        st.markdown("#### 재료 라이브러리")
         st.caption(
             "재료군을 먼저 선택하고, 그 안의 구체 재료를 선택하세요. "
             "선택된 재료의 표준 컴포넌트가 자동으로 제안됩니다."
