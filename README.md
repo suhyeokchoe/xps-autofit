@@ -15,7 +15,7 @@ XPS(X-ray Photoelectron Spectroscopy) 데이터를 업로드하면 자동으로
 
 Live Demo
 
-[https://xps-autofit.streamlit.app](https://xps-autofit.streamlit.app)**
+[https://xps-autofit.streamlit.app](https://xps-autofit.streamlit.app)
 
 브라우저에서 즉시 사용 가능합니다. 설치 불필요.
 
